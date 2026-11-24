@@ -657,11 +657,11 @@ public sealed class LobbyView
         }, Pal.Orange);
         W.Panel("Commands", () =>
         {
-            Row("/saucer", "Open the lobby");
-            Row("/saucer table", "Open the table window");
-            Row("/saucer host bj | poker", "Open a table with your saved rules");
-            Row("/saucer practice bj | poker", "Start a practice table");
-            Row("/saucer leave", "Leave or close the current table");
+            Row("/snights", "Open the lobby");
+            Row("/snights table", "Open the table window");
+            Row("/snights host bj | poker", "Open a table with your saved rules");
+            Row("/snights practice bj | poker", "Start a practice table");
+            Row("/snights leave", "Leave or close the current table");
         });
         W.Panel("Keyboard (turn on in Settings)", () =>
         {

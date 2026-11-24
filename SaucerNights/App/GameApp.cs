@@ -141,7 +141,7 @@ public sealed class GameApp : IDisposable
     private bool HostingBlocks()
     {
         if (!Hub.IsHosting) return false;
-        Notify("You're hosting a table. Close it first (Host tab, or /saucer leave).");
+        Notify("You're hosting a table. Close it first (Host tab, or /snights leave).");
         return true;
     }
 

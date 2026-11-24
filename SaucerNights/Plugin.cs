@@ -15,7 +15,7 @@ namespace SaucerNights;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    private const string Command = "/saucer";
+    private const string Command = "/snights";
     private const string CommandAlias = "/saucernights";
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
@@ -65,7 +65,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var help = new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Saucer Nights. Also: /saucer table | host bj | host poker | practice bj | practice poker | leave | settings",
+            HelpMessage = "Open Saucer Nights. Also: /snights table | host bj | host poker | practice bj | practice poker | leave | settings",
         };
         Commands.AddHandler(Command, help);
         Commands.AddHandler(CommandAlias, new CommandInfo(OnCommand) { ShowInHelp = false });
@@ -165,7 +165,7 @@ public sealed class Plugin : IDalamudPlugin
                 App.Practice(kind.Value);
                 break;
             default:
-                ChatGui.Print("[Saucer Nights] Usage: /saucer [table | host bj|poker | practice bj|poker | leave | settings]");
+                ChatGui.Print("[Saucer Nights] Usage: /snights [table | host bj|poker | practice bj|poker | leave | settings]");
                 break;
         }
     }

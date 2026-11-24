@@ -31,7 +31,7 @@ Saucer Nights is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin, so you
    ```
 
 3. Type `/xlplugins`, search for **Saucer Nights** and press **Install**.
-4. Type `/saucer` to open the lobby.
+4. Type `/snights` to open the lobby.
 
 Everyone at the table needs the plugin and has to be in the same linkshell. Updates arrive through the plugin
 installer like any other plugin.
@@ -47,12 +47,12 @@ installer like any other plugin.
 
 | Command | What it does |
 |---|---|
-| `/saucer` | Open the lobby |
-| `/saucer table` | Open the table window |
-| `/saucer host bj` · `/saucer host poker` | Open a table with your saved rules |
-| `/saucer practice bj` · `/saucer practice poker` | Play against bots |
-| `/saucer leave` | Leave the table (as host: close it) |
-| `/saucer settings` | Settings |
+| `/snights` | Open the lobby |
+| `/snights table` | Open the table window |
+| `/snights host bj` · `/snights host poker` | Open a table with your saved rules |
+| `/snights practice bj` · `/snights practice poker` | Play against bots |
+| `/snights leave` | Leave the table (as host: close it) |
+| `/snights settings` | Settings |
 
 ## What's in it
 
