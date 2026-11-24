@@ -7,7 +7,7 @@
     <LangVersion>preview</LangVersion>
     <RootNamespace>SaucerNights.Core</RootNamespace>
     <Version>1.0.0.0</Version>
-    <Authors>Luna</Authors>
+    <Authors>Birch</Authors>
     <NoWarn>CS1591</NoWarn>
   </PropertyGroup>
 
