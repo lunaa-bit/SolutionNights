@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+*.DotSettings.user
+
+# Preview tool output
+shots/
+
+# OS
+Thumbs.db
+.DS_Store

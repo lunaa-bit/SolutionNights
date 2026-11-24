@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep local folder names out of the shipped .pdb files. -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+</Project>

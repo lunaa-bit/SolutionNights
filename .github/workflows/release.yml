@@ -1,0 +1,68 @@
+name: Release
+
+# Push a version tag (for example 1.0.1.0) to build the plugin, publish a GitHub release
+# with SaucerNights.zip, and point repo.json at it.
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile dalamud.zip
+          Expand-Archive -Force dalamud.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Test
+        run: dotnet test SaucerNights.Tests/SaucerNights.Tests.csproj -c Release
+
+      - name: Build
+        run: dotnet build SaucerNights/SaucerNights.csproj -c Release -p:Version=${{ env.VERSION }}
+
+      - name: Package
+        shell: pwsh
+        run: Copy-Item SaucerNights/bin/Release/SaucerNights/latest.zip SaucerNights.zip
+
+      - name: Create release
+        shell: pwsh
+        run: gh release create $env:VERSION SaucerNights.zip --title "Saucer Nights $env:VERSION" --generate-notes
+
+      - name: Update repo.json
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git checkout main
+          $url = "https://github.com/${{ github.repository }}/releases/download/$env:VERSION/SaucerNights.zip"
+          $repo = Get-Content repo.json -Raw | ConvertFrom-Json
+          $entry = @($repo)[0]
+          $entry.AssemblyVersion = $env:VERSION
+          $entry.TestingAssemblyVersion = $env:VERSION
+          $entry.DownloadLinkInstall = $url
+          $entry.DownloadLinkUpdate = $url
+          $entry.DownloadLinkTesting = $url
+          $entry.LastUpdate = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          ConvertTo-Json -InputObject @($entry) -Depth 5 | Set-Content repo.json -Encoding utf8NoBOM
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.json
+          git commit -m "repo.json: $env:VERSION"
+          git push origin main

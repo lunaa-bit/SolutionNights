@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Offline UI preview: runs the plugin's ImGui drawing code against Dalamud's ImGui bindings with a small software
+    rasteriser and writes PNG screenshots. Not shipped; used to check the look without the game.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>CS1591</NoWarn>
+    <DalamudLibPath>$(appdata)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+    <DefineConstants>$(DefineConstants);PREVIEW</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SaucerNights.Core\SaucerNights.Core.csproj" />
+    <Reference Include="Dalamud.Bindings.ImGui">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+    </Reference>
+    <Reference Include="HexaGen.Runtime">
+      <HintPath>$(DalamudLibPath)HexaGen.Runtime.dll</HintPath>
+    </Reference>
+    <None Include="$(DalamudLibPath)cimgui.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!-- The plugin's Dalamud-free UI layer is compiled in directly. -->
+  <ItemGroup>
+    <Compile Include="..\SaucerNights\Ui\**\*.cs" LinkBase="Ui" />
+    <Compile Include="..\SaucerNights\App\**\*.cs" LinkBase="App" />
+  </ItemGroup>
+
+</Project>
