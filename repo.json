@@ -14,8 +14,8 @@
       "games"
     ],
     "InternalName": "SaucerNights",
-    "AssemblyVersion": "1.0.0.0",
-    "TestingAssemblyVersion": "1.0.0.0",
+    "AssemblyVersion": "1.0.1.0",
+    "TestingAssemblyVersion": "1.0.1.0",
     "RepoUrl": "https://github.com/lunaa-bit/Saucer-Nights",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
@@ -23,10 +23,10 @@
     "IsHide": "False",
     "IsTestingExclusive": "False",
     "DownloadCount": 0,
-    "LastUpdate": 1795546310,
-    "DownloadLinkInstall": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.0.0/SaucerNights.zip",
-    "DownloadLinkUpdate": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.0.0/SaucerNights.zip",
-    "DownloadLinkTesting": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.0.0/SaucerNights.zip",
+    "LastUpdate": 1795546932,
+    "DownloadLinkInstall": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
+    "DownloadLinkUpdate": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
+    "DownloadLinkTesting": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
     "IconUrl": "https://raw.githubusercontent.com/lunaa-bit/Saucer-Nights/main/images/icon.png"
   }
 ]
