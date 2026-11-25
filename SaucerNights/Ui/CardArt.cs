@@ -39,10 +39,12 @@ public static class CardArt
 
     /// <summary>
     /// Draws a card centred at <paramref name="center"/>. <paramref name="flip"/> runs 0 (back) → 1 (face) and squeezes
-    /// the card horizontally through the middle, like turning it over.
+    /// the card horizontally through the middle, like turning it over. <paramref name="shown"/> is how much of the
+    /// card's width is left showing when the next card in a fan covers its right side: only what fits in that strip is
+    /// drawn, so nothing peeks out half cut.
     /// </summary>
     public static void Draw(ImDrawListPtr dl, Vector2 center, float height, Card card, float flip = 1f, float alpha = 1f,
-        bool highlight = false, bool dim = false, float lift = 0)
+        bool highlight = false, bool dim = false, float lift = 0, float shown = 1f)
     {
         if (alpha <= 0.01f) return;
         var faceUp = !card.IsHidden && flip >= 0.5f;
@@ -57,70 +59,190 @@ public static class CardArt
         Gfx.Shadow(dl, min, max, r, height * 0.05f, 0.45f * alpha, new Vector2(height * 0.015f, height * 0.035f + lift * 0.4f));
         if (highlight) Gfx.Glow(dl, min, max, r, Pal.Gold, height * 0.1f, alpha * 1.2f);
 
-        if (faceUp) DrawFace(dl, min, max, r, card, alpha, squeeze);
+        if (faceUp) DrawFace(dl, min, max, r, card, alpha, squeeze, shown);
         else DrawBack(dl, min, max, r, alpha, squeeze);
 
         if (highlight) dl.AddRect(min, max, Pal.U(Pal.Gold, alpha), r, ImDrawFlags.None, Math.Max(1.5f, height * 0.025f));
         if (dim) dl.AddRectFilled(min, max, Pal.U(Pal.Black, 0.48f * alpha), r);
     }
 
-    private static void DrawFace(ImDrawListPtr dl, Vector2 min, Vector2 max, float r, Card card, float alpha, float squeeze)
+    private static void DrawFace(ImDrawListPtr dl, Vector2 min, Vector2 max, float r, Card card, float alpha, float squeeze, float shown)
     {
         Gfx.RoundedGradient(dl, min, max, r, Pal.A(Face, alpha), Pal.A(FaceShade, alpha));
         dl.AddRect(min, max, Pal.U(Edge, alpha), r, ImDrawFlags.None, 1f);
         if (squeeze < 0.55f) return; // too thin mid-flip for detail
 
+        // Lay the face out at full width, then squeeze it about the middle while the card turns over.
         var h = max.Y - min.Y;
-        var w = max.X - min.X;
+        var w = h * Aspect;
+        var mid = (min.X + max.X) / 2;
+        min = new Vector2(mid - w / 2, min.Y);
+        max = new Vector2(mid + w / 2, max.Y);
+        var start = Gfx.Mark(dl);
         var ink = Pal.A(Ink(card.Suit), alpha);
-        var inkU = Pal.U(ink);
+        var center = (min + max) / 2;
 
-        // Corner index.
-        var rankSize = h * 0.26f;
-        var rank = card.RankText;
-        var rs = Gfx.TextSize(FontRole.Card, rankSize, rank);
-        var idxX = min.X + w * 0.17f;
-        var rankPos = new Vector2(idxX - rs.X / 2, min.Y + h * 0.045f);
-        if (rank == "10") rankPos.X += w * 0.02f;
-        Gfx.Text(dl, FontRole.Card, rankSize, rankPos, inkU, rank);
-        Suits.Draw(dl, card.Suit, new Vector2(idxX + (rank == "10" ? w * 0.02f : 0), min.Y + h * 0.34f), h * 0.14f, ink);
-
-        // Small mirrored suit in the opposite corner.
-        Suits.Draw(dl, card.Suit, new Vector2(max.X - w * 0.17f, max.Y - h * 0.13f), h * 0.12f, Pal.A(ink, 0.85f));
-
-        var center = new Vector2((min.X + max.X) / 2 + w * 0.06f, (min.Y + max.Y) / 2 + h * 0.05f);
-        if (card.Rank is >= 11 and <= 13)
+        if (h < TinyBelow)
         {
-            // Court cards: a framed panel with the letter and suit.
-            var pMin = new Vector2(min.X + w * 0.36f, min.Y + h * 0.17f);
-            var pMax = new Vector2(max.X - w * 0.1f, max.Y - h * 0.24f);
-            dl.AddRectFilled(pMin, pMax, Pal.U(Pal.Mix(Face, ink, 0.09f), alpha), r * 0.6f);
-            dl.AddRect(pMin, pMax, Pal.U(ink, 0.55f), r * 0.6f, ImDrawFlags.None, Math.Max(1, h * 0.012f));
-            var pc = (pMin + pMax) / 2;
-            Gfx.TextCentered(dl, FontRole.Card, h * 0.36f, pc - new Vector2(0, h * 0.06f), inkU, card.RankText);
-            Suits.Draw(dl, card.Suit, pc + new Vector2(0, h * 0.15f), h * 0.13f, ink);
-            Crown(dl, new Vector2(pc.X, pMin.Y + h * 0.035f), h * 0.075f, Pal.A(Pal.Gold, alpha));
-        }
-        else if (card.Rank == 14)
-        {
-            Suits.Draw(dl, card.Suit, center, h * 0.44f, ink);
-            dl.AddCircle(center, h * 0.3f, Pal.U(ink, 0.25f), 40, Math.Max(1, h * 0.01f));
+            // Too small for two corners: one big index and a pip, so the card still reads at a glance.
+            Index(dl, min, w, h, card, ink, true);
+            var spot = new Vector2(min.X + w * 0.7f, min.Y + h * 0.72f);
+            if (shown >= 0.9f)
+            {
+                if (card.Rank is >= 11 and <= 13) Medallion(dl, spot, h * 0.17f, h * 0.2f, card, alpha);
+                else Suits.Draw(dl, card.Suit, spot, h * 0.34f, ink);
+            }
         }
         else
         {
-            Suits.Draw(dl, card.Suit, center, h * 0.4f, ink);
+            // Rank over suit in the top-left corner, and the same turned upside down in the bottom-right.
+            Index(dl, min, w, h, card, ink, false);
+            if (shown >= 0.999f)
+            {
+                var turned = Gfx.Mark(dl);
+                Index(dl, min, w, h, card, ink, false);
+                Gfx.Turn(dl, turned, min, max);
+            }
+
+            if (card.Rank is >= 11 and <= 13)
+            {
+                if (shown >= CourtShown) Court(dl, min, max, h, card, ink, alpha);
+            }
+            else
+            {
+                // Suit shapes reach out to 0.47 of their size either side of the middle.
+                var size = h * (card.Rank == 14 ? 0.4f : 0.36f);
+                if (shown >= 0.5f + size * 0.47f / w + 0.02f) Suits.Draw(dl, card.Suit, center, size, ink);
+            }
         }
+
+        if (squeeze < 0.999f) Gfx.SqueezeX(dl, start, mid, squeeze);
     }
 
-    private static void Crown(ImDrawListPtr dl, Vector2 c, float s, Vector4 col)
+    /// <summary>Cards shorter than this many pixels get the single big corner.</summary>
+    private const float TinyBelow = 56f;
+
+    /// <summary>
+    /// Rank over suit in the top-left corner. It stays inside the strip a fanned blackjack hand leaves showing (30% of
+    /// the width), lines the caps up whatever the rank, and leaves room under the rank for the tail of a Q.
+    /// </summary>
+    private static void Index(ImDrawListPtr dl, Vector2 min, float w, float h, Card card, Vector4 ink, bool tiny)
     {
-        var u = Pal.U(col);
-        var b0 = c + new Vector2(-s, s * 0.45f);
-        var b1 = c + new Vector2(s, s * 0.45f);
-        dl.AddRectFilled(b0 - new Vector2(0, s * 0.25f), b1, u);
-        dl.AddTriangleFilled(c + new Vector2(-s, s * 0.25f), c + new Vector2(-s * 0.85f, -s * 0.5f), c + new Vector2(-s * 0.35f, s * 0.25f), u);
-        dl.AddTriangleFilled(c + new Vector2(-s * 0.4f, s * 0.25f), c + new Vector2(0, -s * 0.75f), c + new Vector2(s * 0.4f, s * 0.25f), u);
-        dl.AddTriangleFilled(c + new Vector2(s * 0.35f, s * 0.25f), c + new Vector2(s * 0.85f, -s * 0.5f), c + new Vector2(s, s * 0.25f), u);
+        var rank = card.RankText;
+        var size = h * (tiny ? 0.36f : 0.25f);
+        var font = UiEnv.Font(FontRole.Card, size);
+        var caps = Gfx.Ink(font, size, "K");
+        var (a, b) = Gfx.Ink(font, size, rank);
+        var cx = min.X + w * (tiny ? 0.27f : 0.16f);
+        var pos = new Vector2(MathF.Round(cx - (a.X + b.X) / 2), MathF.Round(min.Y + h * (tiny ? 0.07f : 0.065f) - caps.Min.Y));
+        var mark = Gfx.Mark(dl);
+        dl.AddText(font, size, pos, Pal.U(ink), rank);
+        var widest = w * (tiny ? 0.44f : 0.25f);
+        if (b.X - a.X > widest) Gfx.SqueezeX(dl, mark, cx, widest / (b.X - a.X));
+
+        var baseline = pos.Y + caps.Max.Y;
+        var tail = Math.Max(0, Gfx.Ink(font, size, "Q").Max.Y - caps.Max.Y);
+        var s = h * (tiny ? 0.2f : 0.13f);
+        Suits.Draw(dl, card.Suit, new Vector2(cx, baseline + Math.Max(h * 0.04f, tail + h * 0.022f) + s / 2), s, ink);
+    }
+
+    /// <summary>The share of the width a court card's medallion needs showing before it is drawn.</summary>
+    private const float CourtShown = 0.78f;
+
+    /// <summary>
+    /// Court cards: a night-blue hexagon medallion in the middle (the Solution Nine motif) with a neon rim in the suit
+    /// colour and the letter in gold, a gold headpiece for the rank on top and the suit underneath. Everything stays in
+    /// the band between the two corner indices.
+    /// </summary>
+    private static void Court(ImDrawListPtr dl, Vector2 min, Vector2 max, float h, Card card, Vector4 ink, float alpha)
+    {
+        var c = (min + max) / 2;
+        var rad = h * 0.19f;
+        var flat = rad * 0.866f;
+        Medallion(dl, c, rad, h * 0.24f, card, alpha);
+        Headpiece(dl, card.Rank, new Vector2(c.X, c.Y - flat - h * 0.062f), h * 0.074f, Pal.A(Pal.Gold, alpha), Pal.A(Pal.Hex(0xA8741E), alpha));
+        Suits.Draw(dl, card.Suit, new Vector2(c.X, c.Y + flat + h * 0.075f), h * 0.1f, ink);
+    }
+
+    /// <summary>The hexagon medallion with the court letter, centred on <paramref name="c"/>.</summary>
+    private static void Medallion(ImDrawListPtr dl, Vector2 c, float rad, float letterSize, Card card, float alpha)
+    {
+        Span<Vector2> hex = stackalloc Vector2[6];
+        Gfx.Hexagon(hex, c + new Vector2(0, rad * 0.05f), rad, 0);
+        Gfx.FillConvex(dl, hex, Pal.U(Pal.Black, 0.22f * alpha));
+        Gfx.Hexagon(hex, c, rad, 0);
+        Gfx.FillVertical(dl, hex, Pal.A(Pal.Hex(0x1B2A60), alpha), Pal.A(Pal.Hex(0x080D26), alpha));
+        Gfx.Outline(dl, hex, Pal.U(NeonInk(card.Suit), alpha), Math.Max(1.2f, rad * 0.068f));
+        if (rad > 9)
+        {
+            Gfx.Hexagon(hex, c, rad * 0.84f, 0);
+            Gfx.Outline(dl, hex, Pal.U(Pal.Gold, 0.45f * alpha), Math.Max(1, rad * 0.032f));
+        }
+
+        var font = UiEnv.Font(FontRole.Card, letterSize);
+        var caps = Gfx.Ink(font, letterSize, "K");
+        var (a, b) = Gfx.Ink(font, letterSize, card.RankText);
+        var capH = caps.Max.Y - caps.Min.Y;
+        var pos = new Vector2(MathF.Round(c.X - (a.X + b.X) / 2), MathF.Round(c.Y - capH / 2 - caps.Min.Y));
+        dl.AddText(font, letterSize, pos, Pal.U(Pal.GoldLight, alpha), card.RankText);
+    }
+
+    /// <summary>Bright suit colours for the night medallion.</summary>
+    private static Vector4 NeonInk(Suit s) => FourColor
+        ? s switch { Suit.Clubs => Pal.Hex(0x3DFFA8), Suit.Diamonds => Pal.Hex(0x5AA8FF), Suit.Hearts => Pal.Hex(0xFF4F7A), _ => Pal.Accent }
+        : s is Suit.Diamonds or Suit.Hearts ? Pal.Hex(0xFF4F7A) : Pal.Accent;
+
+    /// <summary>
+    /// A gold headpiece above the medallion, different for each rank: a three-point crown with orbs for the king, a
+    /// five-point tiara for the queen and a band with a single gem for the jack. Drawn centred on <paramref name="c"/>,
+    /// <paramref name="s"/> wide either side.
+    /// </summary>
+    private static void Headpiece(ImDrawListPtr dl, int rank, Vector2 c, float s, Vector4 gold, Vector4 deep)
+    {
+        var u = Pal.U(gold);
+        var band0 = c + new Vector2(-s, s * 0.2f);
+        var band1 = c + new Vector2(s, s * 0.55f);
+        dl.AddRectFilled(band0, band1, u, s * 0.08f);
+        dl.AddLine(new Vector2(band0.X, band1.Y), band1, Pal.U(deep), Math.Max(1, s * 0.12f));
+        var seg = Math.Clamp((int)(s * 0.6f), 8, 16);
+        switch (rank)
+        {
+            case 13:
+            {
+                float[] xs = [-0.82f, 0, 0.82f];
+                float[] hs = [0.55f, 0.85f, 0.55f];
+                for (var i = 0; i < 3; i++)
+                {
+                    var tip = c + new Vector2(xs[i] * s, s * 0.2f - hs[i] * s);
+                    dl.AddTriangleFilled(c + new Vector2((xs[i] - 0.32f) * s, s * 0.22f), tip, c + new Vector2((xs[i] + 0.32f) * s, s * 0.22f), u);
+                    dl.AddCircleFilled(tip, s * 0.14f, u, seg);
+                }
+                dl.AddCircleFilled(c + new Vector2(0, s * 0.37f), s * 0.11f, Pal.U(deep), seg);
+                break;
+            }
+            case 12:
+            {
+                float[] xs = [-0.8f, -0.4f, 0, 0.4f, 0.8f];
+                float[] hs = [0.32f, 0.5f, 0.72f, 0.5f, 0.32f];
+                for (var i = 0; i < 5; i++)
+                {
+                    var tip = c + new Vector2(xs[i] * s, s * 0.2f - hs[i] * s);
+                    dl.AddTriangleFilled(c + new Vector2((xs[i] - 0.2f) * s, s * 0.22f), tip, c + new Vector2((xs[i] + 0.2f) * s, s * 0.22f), u);
+                }
+                dl.AddCircleFilled(c + new Vector2(0, s * -0.52f), s * 0.12f, u, seg);
+                dl.AddCircleFilled(c + new Vector2(0, s * 0.37f), s * 0.1f, Pal.U(deep), seg);
+                break;
+            }
+            default:
+            {
+                // A gem on the band, with a small point either side.
+                dl.AddQuadFilled(c + new Vector2(0, -s * 0.62f), c + new Vector2(s * 0.3f, -s * 0.12f), c + new Vector2(0, s * 0.3f), c + new Vector2(-s * 0.3f, -s * 0.12f), u);
+                dl.AddQuadFilled(c + new Vector2(0, -s * 0.38f), c + new Vector2(s * 0.14f, -s * 0.12f), c + new Vector2(0, s * 0.12f), c + new Vector2(-s * 0.14f, -s * 0.12f), Pal.U(deep));
+                dl.AddTriangleFilled(c + new Vector2(-s * 0.95f, s * 0.22f), c + new Vector2(-s * 0.75f, -s * 0.12f), c + new Vector2(-s * 0.55f, s * 0.22f), u);
+                dl.AddTriangleFilled(c + new Vector2(s * 0.55f, s * 0.22f), c + new Vector2(s * 0.75f, -s * 0.12f), c + new Vector2(s * 0.95f, s * 0.22f), u);
+                break;
+            }
+        }
     }
 
     private static void DrawBack(ImDrawListPtr dl, Vector2 min, Vector2 max, float r, float alpha, float squeeze)

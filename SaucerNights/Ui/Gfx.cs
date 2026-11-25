@@ -297,6 +297,46 @@ public static class Gfx
 
     // ───────────── Text ─────────────
 
+    /// <summary>
+    /// The inked box of <paramref name="text"/> relative to where it is drawn: glyph outlines rather than the line box,
+    /// so letters can be lined up by their caps and baseline whatever the font.
+    /// </summary>
+    public static unsafe (Vector2 Min, Vector2 Max) Ink(ImFontPtr font, float size, string text)
+    {
+        var k = size / Math.Max(1f, font.FontSize);
+        float x = 0, x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+        foreach (var ch in text)
+        {
+            var g = font.FindGlyph(ch);
+            if (g == null) continue;
+            x0 = Math.Min(x0, x + g->X0 * k);
+            x1 = Math.Max(x1, x + g->X1 * k);
+            y0 = Math.Min(y0, g->Y0 * k);
+            y1 = Math.Max(y1, g->Y1 * k);
+            x += g->AdvanceX * k;
+        }
+        return x0 > x1 ? (Vector2.Zero, TextSize(font, size, text)) : (new Vector2(x0, y0), new Vector2(x1, y1));
+    }
+
+    /// <summary>The number of vertices in the draw list, to transform what is drawn after it.</summary>
+    public static int Mark(ImDrawListPtr dl) => dl.VtxBuffer.Size;
+
+    /// <summary>Squeezes everything drawn since <paramref name="mark"/> horizontally about <paramref name="cx"/>.</summary>
+    public static unsafe void SqueezeX(ImDrawListPtr dl, int mark, float cx, float k)
+    {
+        var v = (ImDrawVert*)dl.VtxBuffer.Data;
+        for (var i = mark; i < dl.VtxBuffer.Size; i++) v[i].Pos.X = cx + (v[i].Pos.X - cx) * k;
+    }
+
+    /// <summary>Turns everything drawn since <paramref name="mark"/> half a turn about the middle of a box.</summary>
+    public static unsafe void Turn(ImDrawListPtr dl, int mark, Vector2 min, Vector2 max)
+    {
+        // Rounded to whole pixels so turned text stays on the pixel grid.
+        var sum = new Vector2(MathF.Round(min.X + max.X), MathF.Round(min.Y + max.Y));
+        var v = (ImDrawVert*)dl.VtxBuffer.Data;
+        for (var i = mark; i < dl.VtxBuffer.Size; i++) v[i].Pos = sum - v[i].Pos;
+    }
+
     public static Vector2 TextSize(ImFontPtr font, float size, string text)
     {
         return ImGui.CalcTextSizeA(font, size, float.MaxValue, 0, text, out _);

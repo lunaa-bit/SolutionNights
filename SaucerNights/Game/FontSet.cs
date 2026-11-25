@@ -8,12 +8,13 @@ namespace SaucerNights.Game;
 
 /// <summary>
 /// Fonts baked at the sizes the UI draws at, times the plugin's own UI scale: the game's TrumpGothic for headings and
-/// banners, a classic serif (when Windows has Georgia) for card ranks, and Dalamud's font for body text and captions.
+/// banners, a classic serif with even-height numerals (Times New Roman, else Georgia) for card ranks, and Dalamud's font
+/// for body text and captions.
 /// Rebuilt when the UI scale changes.
 /// </summary>
 internal sealed class FontSet : IDisposable
 {
-    private const string Georgia = @"C:\Windows\Fonts\georgiab.ttf";
+    private static readonly string? CardSerif = new[] { @"C:\Windows\Fonts\timesbd.ttf", @"C:\Windows\Fonts\georgiab.ttf" }.FirstOrDefault(File.Exists);
     private const float BodyPx = 16;
 
     private readonly IFontHandle? _body;
@@ -45,12 +46,12 @@ internal sealed class FontSet : IDisposable
 
     private static IFontHandle CardFont(IFontAtlas atlas, float px, float fallbackPx)
     {
-        if (!File.Exists(Georgia)) return atlas.NewGameFontHandle(new GameFontStyle(GameFontFamily.TrumpGothic, fallbackPx));
+        if (CardSerif == null) return atlas.NewGameFontHandle(new GameFontStyle(GameFontFamily.TrumpGothic, fallbackPx));
         return atlas.NewDelegateFontHandle(e => e.OnPreBuild(tk =>
         {
             try
             {
-                tk.AddFontFromFile(Georgia, new SafeFontConfig { SizePx = px });
+                tk.AddFontFromFile(CardSerif, new SafeFontConfig { SizePx = px });
             }
             catch
             {

@@ -123,6 +123,14 @@ internal static class Scenarios
         ("rl-spin", RouletteSpin),
         ("rl-settle", RouletteSettle),
         ("rl-host", RouletteHost),
+        ("bj-crowd", (h, p) => BlackjackCrowd(h, p, new Vector2(1300, 840))),
+        ("bj-crowd-small", (h, p) => BlackjackCrowd(h, p, new Vector2(960, 700))),
+        ("pk-crowd", (h, p) => PokerCrowd(h, p, new Vector2(1300, 840))),
+        ("pk-crowd-small", (h, p) => PokerCrowd(h, p, new Vector2(960, 700))),
+        ("cards-deck", CardSheet.Deck),
+        ("cards-courts", CardSheet.Courts),
+        ("cards-sizes", CardSheet.Sizes),
+        ("cards-hands", CardSheet.Hands),
     ];
 
     private static readonly (byte Index, long Amount)[] DemoBets = [(17, 25), (124, 10), (151, 100), (146, 50), (138, 25)];
@@ -221,8 +229,11 @@ internal static class Scenarios
     public static void LobbyFrame(GameApp app, LobbyView view) =>
         Window("Solution Nights##lobby", new Vector2(20, 20), new Vector2(980, 720), () => view.Draw(app, () => { }), ImGuiWindowFlags.NoScrollbar);
 
+    /// <summary>Table window size in unscaled pixels (some scenarios try a smaller window).</summary>
+    public static Vector2 TableSize = new(1300, 840);
+
     public static void TableFrame(GameApp app, TableView view) =>
-        Window("Solution Nights - Table##table", new Vector2(10, 10), new Vector2(1300, 840), () => view.Draw(app, () => { }), ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        Window("Solution Nights - Table##table", new Vector2(10, 10), TableSize, () => view.Draw(app, () => { }), ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
     /// <summary>Runs the app for a while (clock and UI time together), drawing frames so animations progress.</summary>
     public static void Run(PreviewHost host, GameApp app, ManualClock clock, Action frame, double seconds, Func<bool>? until = null, Action? each = null)
@@ -376,6 +387,80 @@ internal static class Scenarios
         host.Save(path);
     }
 
+    /// <summary>A full blackjack table caught when an end seat holds a long hand (cards near the shoe and plates).</summary>
+    private static void BlackjackCrowd(PreviewHost host, string path, Vector2 size)
+    {
+        var old = TableSize;
+        TableSize = size;
+        try
+        {
+            var (app, clock) = NewApp();
+            app.Settings.PracticeBots = 6;
+            app.Settings.Blackjack.MaxSeats = 7;
+            app.Practice(GameKind.Blackjack);
+            var view = new TableView();
+            long betRound = -1;
+            Run(host, app, clock, () => TableFrame(app, view), 3600, () =>
+            {
+                var s = app.Hub.Table!;
+                return s.Blackjack is { Phase: BjPhase.PlayerTurns or BjPhase.Settled } v
+                    && v.Seats.Any(x => (x.Seat == 0 || x.Seat == 6) && x.Hands.Any(hd => hd.Cards.Count >= 4));
+            }, () =>
+            {
+                var s = app.Hub.Table!;
+                if (s.Blackjack is { Phase: BjPhase.Betting } v && v.Round != betRound && s.IsSeated)
+                {
+                    betRound = v.Round;
+                    s.PlaceBet(100);
+                }
+                if (s.Blackjack is { Phase: BjPhase.PlayerTurns } p && p.ActiveSeat == s.MySeat && !s.AwaitingHost)
+                {
+                    var cards = p.Seat(s.MySeat)!.Hands[p.ActiveHand].Cards;
+                    // Hit a little further than a bot would, so long hands turn up sooner.
+                    var act = BjMath.Total(cards) < 18 && p.Allowed.HasFlag(BjActions.Hit) ? BjActionKind.Hit : (BjActionKind)BlackjackBot.Decide(cards, p.Dealer[0], p.Allowed);
+                    s.Act((byte)act, 0, p.ActiveHand);
+                }
+                if (s.Blackjack is { Phase: BjPhase.Insurance } i && i.Seat(s.MySeat)?.InsuranceState == InsuranceState.Undecided)
+                    s.Act((byte)BjActionKind.DeclineInsurance);
+            });
+            Run(host, app, clock, () => TableFrame(app, view), 1.2);
+            host.Frame(() => TableFrame(app, view), 0.05f);
+            host.Save(path);
+        }
+        finally
+        {
+            TableSize = old;
+        }
+    }
+
+    /// <summary>A full hold'em table at showdown with cards shown at the side seats.</summary>
+    private static void PokerCrowd(PreviewHost host, string path, Vector2 size)
+    {
+        var old = TableSize;
+        TableSize = size;
+        try
+        {
+            var (app, clock) = NewApp();
+            app.Settings.PracticeBots = 6;
+            app.Practice(GameKind.Poker);
+            var view = new TableView();
+            Run(host, app, clock, () => TableFrame(app, view), 3600, () =>
+                app.Hub.Table?.Poker is { Phase: PokerPhase.Showdown } v && v.Seats.Count(x => x.Shown.Count == 2) >= 3, () =>
+            {
+                var s = app.Hub.Table!;
+                if (s.Poker is { BettingRound: true } p && p.ActiveSeat == s.MySeat && !s.AwaitingHost)
+                    s.Act((byte)(p.Allowed.HasFlag(PokerActions.Check) ? PokerActionKind.Check : PokerActionKind.Call));
+            });
+            Run(host, app, clock, () => TableFrame(app, view), 1.5);
+            host.Frame(() => TableFrame(app, view), 0.05f);
+            host.Save(path);
+        }
+        finally
+        {
+            TableSize = old;
+        }
+    }
+
     private static void BlackjackHostView(PreviewHost host, string path)
     {
         var (app, clock) = NewApp();
@@ -476,8 +561,9 @@ internal static class Scenarios
             dl.PopClipRect();
             count = Gfx.RoundedRect(shape, min, max, 96, 12);
             Gfx.NeonOutline(dl, shape.AsSpan(0, count), Pal.Accent, 6, 1.2f);
-            CardArt.Draw(dl, new Vector2(n * 0.38f, n * 0.44f), 270, SaucerNights.Core.Cards.Card.Parse("Ah"), 1, 1f);
-            CardArt.Draw(dl, new Vector2(n * 0.6f, n * 0.41f), 270, SaucerNights.Core.Cards.Card.Parse("As"), 1, 1f);
+            CardArt.Draw(dl, new Vector2(n * 0.33f, n * 0.44f), 270, SaucerNights.Core.Cards.Card.Parse("Ah"), 1, 1f, false, false, 0, n * 0.295f / (270 * CardArt.Aspect));
+            // The logo badge covers this card's bottom-right corner, so leave that corner's index off.
+            CardArt.Draw(dl, new Vector2(n * 0.625f, n * 0.41f), 270, SaucerNights.Core.Cards.Card.Parse("As"), 1, 1f, false, false, 0, 0.99f);
             var c = new Vector2(n * 0.7f, n * 0.71f);
             var hex = new Vector2[6];
             Gfx.Hexagon(hex, c + new Vector2(0, 8), 92);
@@ -706,8 +792,9 @@ internal sealed unsafe class PreviewHost
         var headingS = fonts.AddFontFromFileTTF(@"C:\Windows\Fonts\bahnschrift.ttf", 22f * scale);
         var heading = fonts.AddFontFromFileTTF(@"C:\Windows\Fonts\bahnschrift.ttf", 34f * scale);
         var display = fonts.AddFontFromFileTTF(@"C:\Windows\Fonts\bahnschrift.ttf", 64f * scale);
-        var cardS = fonts.AddFontFromFileTTF(@"C:\Windows\Fonts\georgiab.ttf", 24f * scale);
-        var card = fonts.AddFontFromFileTTF(@"C:\Windows\Fonts\georgiab.ttf", 48f * scale);
+        var cardFile = Path.Combine(@"C:\Windows\Fonts", Environment.GetEnvironmentVariable("SN_CARDFONT") ?? "timesbd.ttf");
+        var cardS = fonts.AddFontFromFileTTF(cardFile, 24f * scale);
+        var card = fonts.AddFontFromFileTTF(cardFile, 48f * scale);
         fonts.Build();
         UiEnv.FontProvider = (role, size) =>
         {

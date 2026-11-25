@@ -172,7 +172,7 @@ public sealed partial class TableLog
         {
             Words(line.Text[pos..m.Index]);
             var card = new Card(byte.Parse(m.Groups[1].Value));
-            var cw = fs * 1.9f;
+            var cw = MiniWidth(card, fs);
             if (x + cw > width && x > 0)
             {
                 row++;
@@ -202,13 +202,17 @@ public sealed partial class TableLog
         }
     }
 
+    /// <summary>Width of a log mini card: rank, a small gap and the suit, so "10" never runs into its suit.</summary>
+    public static float MiniWidth(Card card, float fs) =>
+        Math.Max(fs * 1.9f, UiEnv.S(3) + Gfx.TextSize(FontRole.Body, fs * 0.9f, card.RankText).X + fs * 0.2f + fs * 0.8f);
+
     public static void MiniCard(ImDrawListPtr dl, Vector2 p, Card card, float fs)
     {
-        var size = new Vector2(fs * 1.9f, fs * 1.3f);
+        var size = new Vector2(MiniWidth(card, fs), fs * 1.3f);
         var min = p + new Vector2(0, (fs * 1.35f - size.Y) / 2);
         dl.AddRectFilled(min, min + size, Pal.U(Pal.Hex(0xF4F7FF)), UiEnv.S(2));
         var ink = CardArt.Ink(card.Suit);
-        var rank = card.Rank == 10 ? "10" : card.RankText;
+        var rank = card.RankText;
         var ts = Gfx.TextSize(FontRole.Body, fs * 0.9f, rank);
         dl.AddText(UiEnv.Font(FontRole.Body, fs * 0.9f), fs * 0.9f, min + new Vector2(UiEnv.S(3), (size.Y - ts.Y) / 2), Pal.U(ink), rank);
         Suits.Draw(dl, card.Suit, min + new Vector2(size.X - fs * 0.5f, size.Y / 2), fs * 0.7f, ink);

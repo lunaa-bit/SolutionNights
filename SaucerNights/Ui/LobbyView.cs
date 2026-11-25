@@ -193,7 +193,7 @@ public sealed class LobbyView
         var c = new Vector2(p.X + w / 2, p.Y + S(70));
         var cards = Card.ParseMany("Qh Ks As");
         for (var i = 0; i < 3; i++)
-            CardArt.Draw(dl, c + new Vector2((i - 1) * S(44), MathF.Abs(i - 1) * S(8)), S(96), cards[i], 1, 1, i == 2);
+            CardArt.Draw(dl, c + new Vector2((i - 1) * S(54), MathF.Abs(i - 1) * S(8)), S(96), cards[i], 1, 1, i == 2, false, 0, i < 2 ? S(54) / CardArt.Size(S(96)).X : 1f);
         Gfx.TextGlow(dl, FontRole.Heading, S(26), c + new Vector2(0, S(92)), Pal.Accent, "NO TABLES YET", 0.6f);
         Gfx.TextCentered(dl, FontRole.Body, S(15), c + new Vector2(0, S(122)), Pal.U(Pal.Muted), "Open tables announce themselves about once a minute.");
         Gfx.TextCentered(dl, FontRole.Body, S(15), c + new Vector2(0, S(142)), Pal.U(Pal.Muted), "Press Scan to ask now, host your own, or practise against bots.");
@@ -225,7 +225,7 @@ public sealed class LobbyView
         Gfx.NeonOutline(dl, hex, neon, S(1.4f), 0.7f);
         if (t.Game == GameKind.Blackjack)
         {
-            CardArt.Draw(dl, bc + new Vector2(-S(7), S(1)), S(34), Card.Parse("Ad"));
+            CardArt.Draw(dl, bc + new Vector2(-S(7), S(1)), S(34), Card.Parse("Ad"), 1, 1, false, false, 0, 0.5f);
             CardArt.Draw(dl, bc + new Vector2(S(7), S(-1)), S(34), Card.Parse("Ks"));
         }
         else if (t.Game == GameKind.Roulette)
@@ -379,12 +379,12 @@ public sealed class LobbyView
             switch (g.Art)
             {
                 case 0:
-                    CardArt.Draw(dl, art + new Vector2(-a * 0.22f, a * 0.05f), a, Card.Parse("As"), 1, 1, false, false);
+                    CardArt.Draw(dl, art + new Vector2(-a * 0.22f, a * 0.05f), a, Card.Parse("As"), 1, 1, false, false, 0, 0.44f / CardArt.Aspect);
                     CardArt.Draw(dl, art + new Vector2(a * 0.22f, -a * 0.03f), a, Card.Parse("Kh"), 1, 1, sel);
                     break;
                 case 1:
                     ChipArt.Stack(dl, art + new Vector2(a * 0.36f, a * 0.42f), 1600, a * 0.18f);
-                    CardArt.Draw(dl, art + new Vector2(-a * 0.3f, -a * 0.05f), a * 0.95f, Card.Parse("Qd"));
+                    CardArt.Draw(dl, art + new Vector2(-a * 0.3f, -a * 0.05f), a * 0.95f, Card.Parse("Qd"), 1, 1, false, false, 0, 0.35f / (0.95f * CardArt.Aspect));
                     CardArt.Draw(dl, art + new Vector2(a * 0.05f, -a * 0.1f), a * 0.95f, Card.Parse("Qc"), 1, 1, sel);
                     break;
                 default:

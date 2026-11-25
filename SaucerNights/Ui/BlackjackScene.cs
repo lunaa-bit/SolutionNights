@@ -13,6 +13,24 @@ public sealed class BlackjackScene
     private readonly TableAnimator _a = new();
     private readonly Dictionary<int, double> _betShowAt = new();
     private readonly Dictionary<string, int> _occurrence = new();
+    private readonly List<CardPose> _poses = [];
+
+    /// <summary>Each card in a hand sits this share of a card width to the right of the one before.</summary>
+    private const float FanStep = 0.3f;
+
+    private readonly Dictionary<string, float> _smooth = new();
+
+    /// <summary>Eases a per-key value towards <paramref name="target"/> over a few frames.</summary>
+    private float Smooth(string key, float target)
+    {
+        var v = _smooth.TryGetValue(key, out var cur) ? cur : target;
+        v += (target - v) * Math.Min(1, UiEnv.Dt * 8);
+        _smooth[key] = v;
+        return v;
+    }
+
+    /// <summary>Name plate width for the current layout.</summary>
+    private float _plateW = 176;
     private BlackjackView? _prev;
     private FeltStyle _felt;
     private Vector2 _min;
@@ -48,8 +66,9 @@ public sealed class BlackjackScene
         var radii = new Vector2(Math.Min(w * 0.47f, h * 1.2f), h * 0.79f);
         var ch = Math.Clamp(Math.Min(h * 0.155f, w * 0.085f), S(58), S(150));
         var cw = ch * CardArt.Aspect;
-        var shoe = top + new Vector2(radii.X * 0.62f, radii.Y * 0.13f);
-        var discard = top + new Vector2(-radii.X * 0.62f, radii.Y * 0.13f);
+        // Shoe and discard tray sit in the top corners, out of the way of the end seats' hands.
+        var shoe = top + new Vector2(radii.X * 0.82f, radii.Y * 0.075f);
+        var discard = top + new Vector2(-radii.X * 0.82f, radii.Y * 0.075f);
         var tray = top + new Vector2(0, radii.Y * 0.06f);
         _a.Discard = discard;
         _a.BannerY = 0.37f;
@@ -72,10 +91,13 @@ public sealed class BlackjackScene
             return;
         }
 
+        var n = rules.MaxSeats;
+        _plateW = PlateWidth(top, radii, ch, n);
+        ch = FitCards(top, radii, ch, n);
+        cw = ch * CardArt.Aspect;
         Diff(v, s, now, top, radii, ch, tray);
 
         // Seats.
-        var n = rules.MaxSeats;
         for (var i = 0; i < n; i++)
         {
             var theta = Theta(i, n);
@@ -119,13 +141,90 @@ public sealed class BlackjackScene
     private (Vector2 Circle, Vector2 Plate, Vector2 Cards, float CircleR) SeatGeometry(Vector2 top, Vector2 radii, float theta, float ch)
     {
         var circle = OnEllipse(top, radii, 0.79f, theta);
-        var plate = OnEllipse(top, radii, 0.99f, theta) + new Vector2(0, S(8));
-        var half = SeatArt.Size.X / 2 + S(18);
-        plate.X = Math.Clamp(plate.X, _min.X + half, _max.X - half);
-        var toward = Vector2.Normalize(top + new Vector2(0, radii.Y * 0.3f) - circle);
         var circleR = ch * 0.4f;
-        var cards = circle + toward * (circleR + ch * 0.72f);
+        var plate = PlateFor(circle, top, circleR, _plateW);
+        // Cards sit between the betting spot and the middle of the table. A hand grows to the right, so seats whose
+        // cards land left of their spot start them a little further left, leaving room for a few cards before the fan
+        // reaches the chips.
+        var toward = Vector2.Normalize(top + new Vector2(0, radii.Y * 0.3f) - circle);
+        var cards = circle + toward * (circleR + ch * 0.72f) - new Vector2(Math.Max(0, -toward.X) * ch * CardArt.Aspect * 0.6f, 0);
         return (circle, plate, cards, circleR);
+    }
+
+    /// <summary>
+    /// The name plate goes straight out from the betting spot, just far enough to clear it (and the avatar hexagon on
+    /// the plate's left end). Where the window edge stops that, it drops below the spot instead of sliding over it.
+    /// </summary>
+    private Vector2 PlateFor(Vector2 circle, Vector2 top, float circleR, float plateW)
+    {
+        var half = new Vector2(plateW / 2 + S(16), SeatArt.Size.Y / 2);
+        var outward = Vector2.Normalize(circle - top);
+        var reach = circleR + S(16);
+        var dx = Math.Abs(outward.X) > 1e-3f ? (half.X + reach) / Math.Abs(outward.X) : float.MaxValue;
+        var dy = Math.Abs(outward.Y) > 1e-3f ? (half.Y + reach) / Math.Abs(outward.Y) : float.MaxValue;
+        var plate = circle + outward * Math.Min(dx, dy);
+        var edge = plateW / 2 + S(18);
+        var clamped = Math.Clamp(plate.X, _min.X + edge, _max.X - edge);
+        if (Math.Abs(clamped - plate.X) > 0.5f)
+        {
+            plate.X = clamped;
+            plate.Y = Math.Max(plate.Y, circle.Y + circleR + half.Y + S(14));
+        }
+        return plate;
+    }
+
+    /// <summary>Plate width for this layout: full size unless neighbouring plates on the same level would touch.</summary>
+    private float PlateWidth(Vector2 top, Vector2 radii, float ch, int n)
+    {
+        var full = SeatArt.Size.X;
+        var gap = float.MaxValue;
+        Vector2? prev = null;
+        for (var i = 0; i < n; i++)
+        {
+            var circle = OnEllipse(top, radii, 0.79f, Theta(i, n));
+            var p = PlateFor(circle, top, ch * 0.4f, full);
+            if (prev is { } q && Math.Abs(q.Y - p.Y) < SeatArt.Size.Y + S(8)) gap = Math.Min(gap, Math.Abs(q.X - p.X));
+            prev = p;
+        }
+        return Math.Clamp(gap - S(16), S(96), full);
+    }
+
+    /// <summary>
+    /// Shrinks the cards a little at a time (to three quarters at most) while neighbouring hands of three cards, or the
+    /// total badges under them, would run into each other: many seats in a small window.
+    /// </summary>
+    private float FitCards(Vector2 top, Vector2 radii, float ch, int n)
+    {
+        var floor = Math.Min(ch, S(44));
+        var c = ch;
+        for (var k = 1f; k >= 0.75f; k -= 0.05f)
+        {
+            c = Math.Max(floor, ch * k);
+            if (!HandsOverlap(top, radii, c, n) || c <= floor) break;
+        }
+        return c;
+    }
+
+    private bool HandsOverlap(Vector2 top, Vector2 radii, float ch, int n)
+    {
+        var cw = ch * CardArt.Aspect;
+        Span<Vector4> boxes = stackalloc Vector4[n * 2];
+        for (var i = 0; i < n; i++)
+        {
+            var b = SeatGeometry(top, radii, Theta(i, n), ch).Cards;
+            boxes[i * 2] = new Vector4(b.X - cw / 2, b.Y - ch * 0.78f, b.X + cw * 1.1f, b.Y + ch * 0.5f);
+            var badge = b + new Vector2(cw * 0.3f, ch * 0.62f);
+            boxes[i * 2 + 1] = new Vector4(badge.X - S(24), badge.Y - S(11), badge.X + S(24), badge.Y + S(11));
+        }
+        for (var i = 0; i < n * 2; i++)
+        for (var j = i + 1; j < n * 2; j++)
+        {
+            if (i / 2 == j / 2) continue;
+            var a = boxes[i];
+            var o = boxes[j];
+            if (a.X < o.Z && o.X < a.Z && a.Y < o.W && o.Y < a.W) return true;
+        }
+        return false;
     }
 
     private void DrawSeat(ImDrawListPtr dl, ClientSession s, BlackjackView v, BlackjackRules rules, int i, float theta,
@@ -148,7 +247,7 @@ public sealed class BlackjackScene
         if (sv == null)
         {
             var canSit = s.Status is ClientStatus.Spectating or ClientStatus.Left && !IsHost(s) && !s.Table.Flags.HasFlag(Core.Protocol.TableFlags.Paused) && s.Table.SeatsTaken < s.Table.SeatsMax;
-            if (SeatArt.Empty(dl, plate, canSit ? "Sit here" : "Open seat", canSit, $"##sit{i}") && canSit) s.Join(i);
+            if (SeatArt.Empty(dl, plate, canSit ? "Sit here" : "Open seat", canSit, $"##sit{i}", _plateW) && canSit) s.Join(i);
             return;
         }
 
@@ -190,20 +289,33 @@ public sealed class BlackjackScene
             var basePos = cardsBase + new Vector2(hx, 0);
             var handActive = active && v.ActiveHand == k;
             var lost = resultsShown && hd.Outcome is BjOutcome.Lose or BjOutcome.Surrender;
+            _poses.Clear();
+            // Past three cards the hand eases down in size, so the fan stays as wide as three cards and clear of the
+            // next seat's hand.
+            var fit = Smooth($"fit{i}:{k}", Math.Min(1f, (1 + FanStep * 2) / (1 + FanStep * Math.Max(0, hd.Cards.Count - 1))));
+            var kch = hch * fit;
+            var kcw = kch * CardArt.Aspect;
+            var rise = hd.Cards.Count > 1 ? Math.Min(kch * 0.14f, kch * 0.42f / (hd.Cards.Count - 1)) : 0;
             for (var j = 0; j < hd.Cards.Count; j++)
             {
                 var card = hd.Cards[j];
                 var key = $"s{i}:{card.Code}";
                 var occ = _occurrence.GetValueOrDefault(key);
                 _occurrence[key] = occ + 1;
-                var target = basePos + new Vector2(j * hcw * 0.3f, -j * hch * 0.14f);
-                var pose = _a.Card($"{key}:{occ}", card, target, hch, shoe, now);
+                var target = basePos + new Vector2(j * kcw * FanStep, -j * rise);
+                _poses.Add(_a.Card($"{key}:{occ}", card, target, kch, shoe, now));
+            }
+            for (var j = 0; j < hd.Cards.Count; j++)
+            {
+                var pose = _poses[j];
                 if (!pose.Visible) continue;
-                CardArt.Draw(dl, pose.Pos, hch, card, pose.Flip, 1f, handActive && j == hd.Cards.Count - 1 && pose.Arrived, lost);
+                // Once the next card has landed on this one, only its left-hand strip shows.
+                var covered = j + 1 < _poses.Count && _poses[j + 1] is { Visible: true, Arrived: true };
+                CardArt.Draw(dl, pose.Pos, kch, hd.Cards[j], pose.Flip, 1f, handActive && j == hd.Cards.Count - 1 && pose.Arrived, lost, 0, covered ? FanStep : 1f);
             }
 
             // Total / outcome badge under the hand.
-            var badgePos = basePos + new Vector2(hcw * 0.15f * Math.Max(0, hd.Cards.Count - 1), hch * 0.62f);
+            var badgePos = basePos + new Vector2(kcw * 0.15f * Math.Max(0, hd.Cards.Count - 1), kch * 0.62f);
             if (resultsShown) OutcomeBadge(dl, badgePos, hd, now);
             else if (hd.Cards.Count >= 2) TotalBadge(dl, badgePos, hd, handActive);
         }
@@ -224,7 +336,7 @@ public sealed class BlackjackScene
         var insuranceTurn = v.Phase == BjPhase.Insurance && sv.InsuranceState == InsuranceState.Undecided;
         var entry = s.Roster.BySeat(i);
         SeatArt.Plate(dl, plate, new SeatInfo(name, _a.Count($"bank{i}", sv.Bankroll, now), isMe, active || insuranceTurn, frac,
-            badge.Item1, badge.Item2, sv.Status == BjSeatStatus.SittingOut, entry?.Flags.HasFlag(Core.Protocol.RosterFlags.Host) == true, false), now);
+            badge.Item1, badge.Item2, sv.Status == BjSeatStatus.SittingOut, entry?.Flags.HasFlag(Core.Protocol.RosterFlags.Host) == true, false), now, _plateW);
     }
 
     private static bool IsHost(ClientSession s) => string.Equals(s.Table.HostId, s.SelfId, StringComparison.OrdinalIgnoreCase);
@@ -283,7 +395,8 @@ public sealed class BlackjackScene
     {
         var c = top + new Vector2(0, radii.Y * 0.225f);
         var n = v.Dealer.Count;
-        var gap = cw * 0.62f;
+        // Wide enough that each covered card still shows its whole pip, narrower for long hands.
+        var gap = n <= 1 ? cw : Math.Min(cw * 0.8f, Math.Max(cw * 0.5f, (radii.X * 1.1f - cw) / (n - 1)));
         // Dealer draws at settlement come one at a time.
         var dealerGap = v.Phase == BjPhase.Settled ? 0.55 : 0.13;
         for (var j = 0; j < n; j++)
@@ -291,7 +404,7 @@ public sealed class BlackjackScene
             var target = c + new Vector2((j - (n - 1) / 2f) * gap, 0);
             var pose = _a.Card($"d{j}", v.Dealer[j], target, ch, shoe, now, j >= 2 ? dealerGap : 0.13);
             if (!pose.Visible) continue;
-            CardArt.Draw(dl, pose.Pos, ch, v.Dealer[j], pose.Flip);
+            CardArt.Draw(dl, pose.Pos, ch, v.Dealer[j], pose.Flip, 1, false, false, 0, j + 1 < n ? gap / cw : 1f);
         }
         if (n >= 2 && now >= _a.QuietAt(now) - 0.36)
         {

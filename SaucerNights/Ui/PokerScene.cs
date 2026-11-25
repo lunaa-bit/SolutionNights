@@ -14,6 +14,7 @@ public sealed class PokerScene
     private readonly TableAnimator _a = new();
     private readonly Dictionary<int, double> _betShowAt = new();
     private PokerView? _prev;
+    private readonly List<(Vector2 Min, Vector2 Max)> _labels = [];
     private long _resultsHand = -1;
     private double _resultsAt = double.MaxValue;
     private double _potShowAt;
@@ -31,7 +32,11 @@ public sealed class PokerScene
         _betShowAt.Clear();
     }
 
-    private sealed record Geo(Vector2 C, Vector2 Half, Vector2 SeatRadii, float BoardH, float MeH, float OtherH, Vector2 Origin, Vector2 Min, Vector2 Max, int Seats, int Me);
+    private sealed record Geo(Vector2 C, Vector2 Half, Vector2 SeatRadii, float BoardH, float MeH, float OtherH, Vector2 Origin, Vector2 Min, Vector2 Max, int Seats, int Me)
+    {
+        /// <summary>Name plate width: full size unless the side seats need room for shown cards beside the board.</summary>
+        public float PlateW { get; init; } = SeatArt.Size.X;
+    }
 
     private static Vector2 SeatPos(Geo g, int seat)
     {
@@ -39,9 +44,10 @@ public sealed class PokerScene
         var theta = MathF.PI / 2 + k * MathF.Tau / g.Seats;
         var p = g.C + new Vector2(MathF.Cos(theta) * g.SeatRadii.X, MathF.Sin(theta) * g.SeatRadii.Y);
         // Room for the hexagon avatar, which overhangs the plate's left edge.
-        var half = SeatArt.Size.X / 2 + S(16);
+        var half = g.PlateW / 2 + S(16);
         p.X = Math.Clamp(p.X, g.Min.X + half, g.Max.X - half);
-        p.Y = Math.Clamp(p.Y, g.Min.Y + SeatArt.Size.Y / 2 + S(16), g.Max.Y - SeatArt.Size.Y / 2 - S(4));
+        // Room above for the badge on the top edge, and below for mine, which hangs from the bottom edge.
+        p.Y = Math.Clamp(p.Y, g.Min.Y + SeatArt.Size.Y / 2 + S(16), g.Max.Y - SeatArt.Size.Y / 2 - S(14));
         return p;
     }
 
@@ -61,8 +67,12 @@ public sealed class PokerScene
         var halfX = Math.Min(w * 0.38f, h * 0.95f);
         var half = new Vector2(halfX, Math.Min(h * 0.29f, halfX * 0.58f));
         var boardH = Math.Clamp(Math.Min(h * 0.14f, w * 0.075f), S(52), S(124));
+        // Side seats need their plate, a pair of shown cards and a gap to fit between the window edge and the board.
+        var shownW = boardH * 0.6f * 1.35f * CardArt.Aspect * 1.6f;
+        var boardHalf = boardH * CardArt.Aspect * 1.1f * 2.5f;
+        var plateW = Math.Clamp(c.X - min.X - S(16) - S(22) - shownW - boardHalf, S(112), SeatArt.Size.X);
         var g = new Geo(c, half, half + new Vector2(S(20), S(40)), boardH, boardH * 1.08f, boardH * 0.6f,
-            c - new Vector2(0, half.Y * 0.7f), min, max, rules.MaxSeats, s.IsSeated ? s.MySeat : 0);
+            c - new Vector2(0, half.Y * 0.7f), min, max, rules.MaxSeats, s.IsSeated ? s.MySeat : 0) { PlateW = plateW };
         _a.Discard = g.Origin;
         _a.BannerY = 0.25f;
 
@@ -85,6 +95,7 @@ public sealed class PokerScene
 
         var showdown = v.Phase == PokerPhase.Showdown && now >= _resultsAt - 0.2;
         var winnerCards = showdown ? WinningCards(v) : [];
+        _labels.Clear();
         for (var seat = 0; seat < rules.MaxSeats; seat++)
             DrawSeat(dl, s, v, rules, g, seat, now, app.Clock.Now, showdown, winnerCards, app.Settings.ShowHandStrength);
 
@@ -148,7 +159,7 @@ public sealed class PokerScene
             var isHost = string.Equals(s.Table.HostId, s.SelfId, StringComparison.OrdinalIgnoreCase);
             var canSit = s.Status is ClientStatus.Spectating or ClientStatus.Left && s.Table.SeatsTaken < s.Table.SeatsMax
                          && (!isHost || s.Table.Flags.HasFlag(TableFlags.HostPlays));
-            if (SeatArt.Empty(dl, pos, canSit ? "Sit here" : "Open seat", canSit, $"##sit{seat}") && canSit) s.Join(seat);
+            if (SeatArt.Empty(dl, pos, canSit ? "Sit here" : "Open seat", canSit, $"##sit{seat}", g.PlateW) && canSit) s.Join(seat);
             return;
         }
 
@@ -168,7 +179,7 @@ public sealed class PokerScene
         if (v.Button == seat && v.Phase != PokerPhase.Waiting)
         {
             var perp = new Vector2(-toCenter.Y, toCenter.X);
-            var bp = pos + toCenter * (EdgeDistance(toCenter) + S(16)) + perp * (SeatArt.Size.X * 0.5f + S(4));
+            var bp = pos + toCenter * (EdgeDistance(toCenter, g.PlateW) + S(16)) + perp * (g.PlateW * 0.5f + S(4));
             Span<Vector2> hex = stackalloc Vector2[6];
             Gfx.Hexagon(hex, bp + new Vector2(0, S(2)), S(13));
             Gfx.FillConvex(dl, hex, Pal.U(Pal.Black, 0.5f));
@@ -202,17 +213,20 @@ public sealed class PokerScene
         var big = isMe || sv.Shown.Count == 2;
         var ch = isMe ? g.MeH : sv.Shown.Count == 2 ? g.OtherH * 1.35f : g.OtherH;
         var cw = ch * CardArt.Aspect;
-        var cardsCenter = pos + toCenter * (EdgeDistance(toCenter) + ch * 0.36f);
-        if (isMe) cardsCenter = pos - new Vector2(0, SeatArt.Size.Y * 0.5f + ch * 0.5f - S(6));
+        // My own cards spread far enough to show the first card's pip; others' showdown cards sit tighter.
+        var spread = isMe ? cw * 0.8f : big ? cw * 0.6f : cw * 0.34f;
+        // Mine tuck behind my plate; everyone else's sit just clear of theirs.
+        var cardsCenter = isMe
+            ? pos - new Vector2(0, SeatArt.Size.Y * 0.5f + ch * 0.5f - S(6))
+            : pos + toCenter * (Clearance(toCenter, new Vector2(spread / 2 + cw / 2, ch / 2 + S(2)), g.PlateW) + S(6));
         var isWinner = showdown && sv.Won > 0;
         for (var j = 0; j < cards.Count; j++)
         {
-            var spread = big ? cw * 0.56f : cw * 0.34f;
-            var target = cardsCenter + new Vector2((j - 0.5f) * spread * (big ? 1.08f : 1), (j == 0 ? 1 : -1) * S(2));
+            var target = cardsCenter + new Vector2((j - 0.5f) * spread, (j == 0 ? 1 : -1) * S(2));
             var pose = _a.Card($"h{seat}:{j}", cards[j], target, ch, g.Origin, now);
             if (!pose.Visible) continue;
             var win = isWinner && winnerCards.Contains(cards[j]);
-            CardArt.Draw(dl, pose.Pos, ch, cards[j], faceUp || cards[j].IsHidden ? pose.Flip : 0, 1f, win, folded || (showdown && sv.Shown.Count == 2 && !isWinner), win ? S(5) : 0);
+            CardArt.Draw(dl, pose.Pos, ch, cards[j], faceUp || cards[j].IsHidden ? pose.Flip : 0, 1f, win, folded || (showdown && sv.Shown.Count == 2 && !isWinner), win ? S(5) : 0, j == 0 ? spread / cw : 1f);
         }
 
         // Hand strength / showdown label.
@@ -231,6 +245,17 @@ public sealed class PokerScene
             var ts = Gfx.TextSize(FontRole.Body, fs, label);
             var lMin = lp - new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
             var lMax = lp + new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
+            // Step aside (further from the cards) from a label another seat has already put here.
+            for (var tries = 0; tries < 4; tries++)
+            {
+                var hit = _labels.FindIndex(r => lMin.X < r.Max.X && r.Min.X < lMax.X && lMin.Y < r.Max.Y && r.Min.Y < lMax.Y);
+                if (hit < 0) break;
+                var dy = above ? _labels[hit].Min.Y - S(3) - lMax.Y : _labels[hit].Max.Y + S(3) - lMin.Y;
+                lp.Y += dy;
+                lMin.Y += dy;
+                lMax.Y += dy;
+            }
+            _labels.Add((lMin, lMax));
             var lc = isWinner ? Pal.Gold : Pal.Accent;
             Gfx.ChamferPanel(dl, lMin, lMax, (lMax.Y - lMin.Y) * 0.32f, isWinner ? Pal.Mix(Pal.Gold, Pal.Black, 0.35f) : Pal.Hex(0x0E1530, 0.94f),
                 isWinner ? Pal.Mix(Pal.Gold, Pal.Black, 0.55f) : Pal.Hex(0x080C1E, 0.94f), Pal.A(lc, isWinner ? 1f : 0.55f), 1f, all: true);
@@ -245,13 +270,26 @@ public sealed class PokerScene
         var (badge, badgeCol) = Badge(v, sv, seat, entry?.Flags ?? RosterFlags.None);
         SeatArt.Plate(dl, pos, new SeatInfo(s.NameAt(seat), _a.Count($"stack{seat}", sv.Stack, now), isMe, active, frac, badge, badgeCol,
             folded || sv.Status is PokerSeatStatus.SittingOut or PokerSeatStatus.Waiting && v.Phase != PokerPhase.Waiting,
-            entry?.Flags.HasFlag(RosterFlags.Host) == true, sv.Status == PokerSeatStatus.SittingOut), now);
+            entry?.Flags.HasFlag(RosterFlags.Host) == true, sv.Status == PokerSeatStatus.SittingOut), now, g.PlateW, badgeBelow: isMe);
+    }
+
+    /// <summary>
+    /// How far along <paramref name="dir"/> from a plate's centre a box of half-size <paramref name="half"/> has to sit
+    /// to clear the plate, its avatar hexagon (which overhangs the left end) and the badge on its top edge.
+    /// </summary>
+    private static float Clearance(Vector2 dir, Vector2 half, float plateW)
+    {
+        var px = plateW / 2 + (dir.X < 0 ? S(16) : 0);
+        var py = SeatArt.Size.Y / 2 + (dir.Y < 0 ? S(12) : 0);
+        var dx = Math.Abs(dir.X) > 1e-3f ? (px + half.X) / Math.Abs(dir.X) : float.MaxValue;
+        var dy = Math.Abs(dir.Y) > 1e-3f ? (py + half.Y) / Math.Abs(dir.Y) : float.MaxValue;
+        return Math.Min(dx, dy);
     }
 
     /// <summary>Distance from the plate's centre to its edge along a direction.</summary>
-    private static float EdgeDistance(Vector2 dir)
+    private static float EdgeDistance(Vector2 dir, float plateW)
     {
-        var half = SeatArt.Size / 2;
+        var half = new Vector2(plateW, SeatArt.Size.Y) / 2;
         var dx = Math.Abs(dir.X) > 1e-3f ? half.X / Math.Abs(dir.X) : float.MaxValue;
         var dy = Math.Abs(dir.Y) > 1e-3f ? half.Y / Math.Abs(dir.Y) : float.MaxValue;
         return Math.Min(dx, dy);

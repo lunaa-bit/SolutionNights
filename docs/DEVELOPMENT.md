@@ -40,6 +40,11 @@ dotnet run --project SaucerNights.Preview -- <outDir> [--scale=1.25] [intro lobb
 dotnet run --project SaucerNights.Preview -- <outDir> [--scale=1.25] soak=24
 ```
 
+The `cards-deck`, `cards-sizes`, `cards-hands` and `cards-courts` scenarios lay out every card face and back, at every
+size the tables use and fanned the way the tables fan them, for checking the card art up close (render with
+`--scale=2` for detail). `bj-crowd`, `pk-crowd` and their `-small` versions fill a table and catch long hands and
+showdowns in a full-size and a small window, for checking that cards, plates and labels stay clear of each other.
+
 `soak=N` plays N long practice sessions (hold'em, blackjack and roulette in turn, one to six bots, a bot in your own seat,
 every felt and card back), drawing every frame of the real table window. It fails if anything throws, chips stop
 adding up or play stalls, and saves a snapshot every 20 seconds of table time plus 3x3 contact sheets for review.

@@ -320,7 +320,8 @@ public static class SeatArt
 
     public static Vector2 Size => new(S(176), S(54));
 
-    public static void Plate(ImDrawListPtr dl, Vector2 center, SeatInfo s, double now, float width = 0)
+    /// <param name="badgeBelow">Hangs the badge from the bottom edge (for a seat whose cards tuck behind the top).</param>
+    public static void Plate(ImDrawListPtr dl, Vector2 center, SeatInfo s, double now, float width = 0, bool badgeBelow = false)
     {
         var size = width > 0 ? new Vector2(width, Size.Y) : Size;
         var min = center - size / 2;
@@ -382,7 +383,7 @@ public static class SeatArt
         {
             var fs = S(12);
             var ts = Gfx.TextSize(FontRole.Body, fs, s.Badge);
-            var bc = new Vector2(center.X + S(16), min.Y - S(2));
+            var bc = new Vector2(center.X + S(16), badgeBelow ? max.Y + S(2) : min.Y - S(2));
             var bMin = bc - new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
             var bMax = bc + new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
             Gfx.ChamferPanel(dl, bMin, bMax, (bMax.Y - bMin.Y) * 0.32f, Pal.Mix(s.BadgeColor, Pal.Black, 0.45f), Pal.Mix(s.BadgeColor, Pal.Black, 0.65f),
