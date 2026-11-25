@@ -11,6 +11,9 @@ public enum Tone
     Danger,
     Info,
     Ghost,
+
+    /// <summary>Money moves: bet, raise, double.</summary>
+    Gold,
 }
 
 public enum Icon
@@ -41,11 +44,15 @@ public enum Icon
     Bolt,
 }
 
-/// <summary>Custom-drawn widgets with eased hover/press states.</summary>
+/// <summary>Custom-drawn widgets in the Solution Nine style: angular glass, neon edges, eased hover and press.</summary>
 public static class W
 {
     private static readonly Dictionary<uint, float> Hover = new();
     private static readonly Dictionary<uint, float> Switches = new();
+    private static float _panelRight = float.MaxValue;
+
+    /// <summary>Width left on this line, stopping at the padding of the panel being drawn (if any).</summary>
+    public static float Avail() => Math.Max(1, Math.Min(ImGui.GetContentRegionAvail().X, _panelRight - ImGui.GetCursorScreenPos().X));
 
     private static float S(float v) => UiEnv.S(v);
 
@@ -57,27 +64,30 @@ public static class W
         return v;
     }
 
+    /// <summary>Gradient top, gradient bottom, text, border/glow.</summary>
     public static (Vector4 Top, Vector4 Bottom, Vector4 Text, Vector4 Border) ToneColors(Tone tone) => tone switch
     {
-        Tone.Primary => (Pal.Hex(0xF3C969), Pal.Hex(0xC98E2C), Pal.Hex(0x22180A), Pal.Hex(0xFFE3A3)),
-        Tone.Success => (Pal.Hex(0x34B979), Pal.Hex(0x1F8553), Pal.White, Pal.Hex(0x67E0A6)),
-        Tone.Danger => (Pal.Hex(0xE2575B), Pal.Hex(0xA8303A), Pal.White, Pal.Hex(0xFF8A8D)),
-        Tone.Info => (Pal.Hex(0x4C8FD6), Pal.Hex(0x2C5E9E), Pal.White, Pal.Hex(0x86BDF5)),
+        Tone.Primary => (Pal.Hex(0x4FE7FF), Pal.Hex(0x0B93C9), Pal.Hex(0x03121E), Pal.Hex(0xB4F3FF)),
+        Tone.Gold => (Pal.Hex(0xFFD777), Pal.Hex(0xDB9420), Pal.Hex(0x231402), Pal.Hex(0xFFE9B0)),
+        Tone.Success => (Pal.Hex(0x45EDB0), Pal.Hex(0x0F9F6C), Pal.Hex(0x02180F), Pal.Hex(0xA8FFDA)),
+        Tone.Danger => (Pal.Hex(0xFF5E7C), Pal.Hex(0xBE1B49), Pal.White, Pal.Hex(0xFFA3B6)),
+        Tone.Info => (Pal.Hex(0x9C80FF), Pal.Hex(0x5636D8), Pal.White, Pal.Hex(0xCBBBFF)),
         Tone.Ghost => (Pal.A(Pal.Panel2, 0f), Pal.A(Pal.Panel2, 0f), Pal.Muted, Pal.A(Pal.Line, 0f)),
-        _ => (Pal.Hex(0x2A333F), Pal.Hex(0x1E252E), Pal.Text, Pal.Hex(0x3A4553)),
+        _ => (Pal.Hex(0x1B2650), Pal.Hex(0x111936), Pal.Text, Pal.Hex(0x34467E)),
     };
 
     /// <summary>
-    /// A rounded gradient button. <paramref name="hint"/> is a keyboard key shown in the corner; <paramref name="sub"/>
-    /// is a second, smaller line (e.g. an amount).
+    /// An angular gradient button. <paramref name="hint"/> is a keyboard key shown in the corner; <paramref name="sub"/>
+    /// is a second, smaller line (e.g. an amount). Heading-font labels are set in capitals.
     /// </summary>
     public static bool Button(string label, Vector2 size, Tone tone = Tone.Neutral, bool enabled = true, string? hint = null,
         string? sub = null, Icon? icon = null, FontRole font = FontRole.Body, float fontSize = 0)
     {
         var id = ImGui.GetID(label);
         var visible = label.Split("##")[0];
+        if (font == FontRole.Heading) visible = visible.ToUpperInvariant();
         var p = ImGui.GetCursorScreenPos();
-        if (size.X <= 0) size.X = Gfx.TextSize(FontRole.Body, ImGui.GetFontSize(), visible).X + S(28) + (icon != null ? S(22) : 0);
+        if (size.X <= 0) size.X = Gfx.TextSize(FontRole.Body, ImGui.GetFontSize(), visible).X + S(30) + (icon != null ? S(22) : 0);
         if (size.Y <= 0) size.Y = ImGui.GetFrameHeight() + S(4);
         var clicked = ImGui.InvisibleButton(label, size) && enabled;
         var hovered = ImGui.IsItemHovered() && enabled;
@@ -85,25 +95,34 @@ public static class W
         var h = HoverAnim(id, hovered);
         var dl = ImGui.GetWindowDrawList();
         var (top, bottom, text, border) = ToneColors(tone);
-        var r = Math.Min(S(9), size.Y / 2);
+        var cut = Math.Min(S(11), size.Y * 0.3f);
 
         if (!enabled)
         {
-            top = Pal.Mix(top, Pal.Panel2, 0.75f);
-            bottom = Pal.Mix(bottom, Pal.Panel2, 0.75f);
-            text = Pal.A(Pal.Muted, 0.6f);
+            top = Pal.Mix(top, Pal.Panel2, 0.8f);
+            bottom = Pal.Mix(bottom, Pal.Panel, 0.8f);
+            text = Pal.A(Pal.Muted, 0.55f);
             border = Pal.Line;
         }
         else if (tone == Tone.Ghost)
         {
             top = bottom = Pal.A(Pal.Panel3, h * 0.9f);
             text = Pal.Mix(Pal.Muted, Pal.Text, h);
+            border = Pal.A(Pal.Accent, h * 0.5f);
+        }
+        else if (tone == Tone.Neutral)
+        {
+            border = Pal.Mix(border, Pal.Accent, h * 0.8f);
         }
 
         var lift = held ? 0 : -h * S(1.5f);
         var min = p + new Vector2(0, lift);
         var max = p + size + new Vector2(0, lift);
-        if (enabled && tone != Tone.Ghost) Gfx.Shadow(dl, min, max, r, S(4) + h * S(4), 0.35f, new Vector2(0, S(2)));
+        if (enabled && tone != Tone.Ghost)
+        {
+            Gfx.Shadow(dl, min, max, S(3), S(4) + h * S(3), 0.4f, new Vector2(0, S(2)));
+            if (h > 0.01f) Gfx.ChamferGlow(dl, min, max, cut, border, S(9), h * 0.9f);
+        }
         if (held)
         {
             top = Pal.Darken(top, 0.12f);
@@ -114,17 +133,23 @@ public static class W
             top = Pal.Lighten(top, 0.1f * h);
             bottom = Pal.Lighten(bottom, 0.06f * h);
         }
-        Gfx.RoundedGradient(dl, min, max, r, top, bottom);
+        Gfx.ChamferPanel(dl, min, max, cut, top, bottom);
         if (tone != Tone.Ghost || h > 0.01f)
         {
-            dl.AddRect(min, max, Pal.U(border, enabled ? 0.55f + 0.45f * h : 0.5f), r, ImDrawFlags.None, 1f);
-            // Top highlight line.
-            dl.AddLine(new Vector2(min.X + r, min.Y + 1), new Vector2(max.X - r, min.Y + 1), Pal.U(Pal.White, enabled ? 0.10f + 0.08f * h : 0.04f));
+            Gfx.ChamferOutline(dl, min, max, cut, Pal.U(border, enabled ? 0.55f + 0.45f * h : 0.6f), 1f);
+            // Glass highlight along the top edge.
+            dl.AddLine(new Vector2(min.X + cut + 1, min.Y + 1.5f), new Vector2(max.X - 2, min.Y + 1.5f), Pal.U(Pal.White, enabled ? 0.16f + 0.1f * h : 0.04f));
         }
 
         var fs = fontSize > 0 ? fontSize : ImGui.GetFontSize();
         var ts = Gfx.TextSize(font, fs, visible);
-        var subSize = fs * 0.78f;
+        var room = size.X - S(18) - (icon != null ? fs * 1.05f + S(6) : 0);
+        if (ts.X > room && room > 0)
+        {
+            fs *= room / ts.X;
+            ts = Gfx.TextSize(font, fs, visible);
+        }
+        var subSize = fs * 0.72f;
         var subTs = sub != null ? Gfx.TextSize(FontRole.Body, subSize, sub) : Vector2.Zero;
         var iconW = icon != null ? fs * 1.05f + S(6) : 0;
         var contentW = iconW + Math.Max(ts.X, subTs.X);
@@ -135,19 +160,19 @@ public static class W
         x += iconW;
         if (sub == null)
         {
-            dl.AddText(UiEnv.Font(font), fs, new Vector2(x + (contentW - iconW - ts.X) / 2, cy - ts.Y / 2), tu, visible);
+            dl.AddText(UiEnv.Font(font, fs), fs, new Vector2(x + (contentW - iconW - ts.X) / 2, cy - ts.Y / 2), tu, visible);
         }
         else
         {
             var total = ts.Y + subTs.Y * 0.9f;
-            dl.AddText(UiEnv.Font(font), fs, new Vector2(x + (contentW - iconW - ts.X) / 2, cy - total / 2), tu, visible);
-            dl.AddText(UiEnv.Font(FontRole.Body, subSize), subSize, new Vector2(x + (contentW - iconW - subTs.X) / 2, cy - total / 2 + ts.Y * 0.95f), Pal.U(text, 0.8f), sub);
+            dl.AddText(UiEnv.Font(font, fs), fs, new Vector2(x + (contentW - iconW - ts.X) / 2, cy - total / 2), tu, visible);
+            dl.AddText(UiEnv.Font(FontRole.Body, subSize), subSize, new Vector2(x + (contentW - iconW - subTs.X) / 2, cy - total / 2 + ts.Y * 0.95f), Pal.U(text, 0.78f), sub);
         }
         if (hint != null && enabled)
         {
             var hs = Gfx.TextSize(FontRole.Body, S(11), hint);
-            var hp = new Vector2(max.X - hs.X - S(7), min.Y + S(4));
-            dl.AddRectFilled(hp - new Vector2(S(3), S(1)), hp + hs + new Vector2(S(3), S(1)), Pal.U(Pal.Black, 0.25f), S(3));
+            var hp = new Vector2(max.X - hs.X - S(8), min.Y + S(4));
+            dl.AddRectFilled(hp - new Vector2(S(3), S(1)), hp + hs + new Vector2(S(3), S(1)), Pal.U(Pal.Black, 0.25f), S(2));
             dl.AddText(UiEnv.Font(FontRole.Body, S(11)), S(11), hp, Pal.U(text, 0.7f), hint);
         }
         if (hovered) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
@@ -162,18 +187,19 @@ public static class W
         var hovered = ImGui.IsItemHovered();
         var h = HoverAnim(ImGui.GetID(id), hovered && enabled);
         var dl = ImGui.GetWindowDrawList();
-        var r = S(8);
-        var (top, bottom, text, _) = ToneColors(tone);
+        var cut = size * 0.24f;
+        var max = p + new Vector2(size);
+        var (top, bottom, text, border) = ToneColors(tone);
         if (tone == Tone.Ghost || active)
         {
-            var bg = active ? Pal.A(Pal.Gold, 0.16f + 0.1f * h) : Pal.A(Pal.Panel3, h);
-            dl.AddRectFilled(p, p + new Vector2(size), Pal.U(bg), r);
-            if (active) dl.AddRect(p, p + new Vector2(size), Pal.U(Pal.Gold, 0.5f), r);
-            text = active ? Pal.GoldLight : Pal.Mix(Pal.Muted, Pal.Text, h);
+            var bg = active ? Pal.A(Pal.Accent, 0.14f + 0.1f * h) : Pal.A(Pal.Panel3, h);
+            Gfx.ChamferPanel(dl, p, max, cut, bg, bg);
+            if (active || h > 0.01f) Gfx.ChamferOutline(dl, p, max, cut, Pal.U(Pal.Accent, active ? 0.6f : 0.35f * h), 1f);
+            text = active ? Pal.AccentLight : Pal.Mix(Pal.Muted, Pal.Text, h);
         }
         else
         {
-            Gfx.RoundedGradient(dl, p, p + new Vector2(size), r, Pal.Lighten(top, 0.1f * h), bottom);
+            Gfx.ChamferPanel(dl, p, max, cut, Pal.Lighten(top, 0.1f * h), bottom, Pal.A(Pal.Mix(border, Pal.Accent, h), 0.6f + 0.4f * h));
         }
         if (!enabled) text = Pal.A(Pal.Muted, 0.4f);
         Icons.Draw(dl, icon, p + new Vector2(size / 2), size * 0.5f, text);
@@ -182,7 +208,7 @@ public static class W
         return clicked;
     }
 
-    /// <summary>A small coloured label with a dot.</summary>
+    /// <summary>A small angular tag with a diamond marker.</summary>
     public static void Pill(string text, Vector4 color, bool dot = true)
     {
         var dl = ImGui.GetWindowDrawList();
@@ -190,20 +216,31 @@ public static class W
         var fs = S(13);
         var ts = Gfx.TextSize(FontRole.Body, fs, text);
         var h = ts.Y + S(8);
-        var w = ts.X + S(dot ? 24 : 16);
-        dl.AddRectFilled(p, p + new Vector2(w, h), Pal.U(color, 0.14f), h / 2);
-        dl.AddRect(p, p + new Vector2(w, h), Pal.U(color, 0.4f), h / 2);
-        var x = p.X + S(8);
+        var w = ts.X + S(dot ? 26 : 18);
+        var max = p + new Vector2(w, h);
+        Gfx.ChamferPanel(dl, p, max, h * 0.32f, Pal.A(color, 0.18f), Pal.A(color, 0.1f), Pal.A(color, 0.5f), 1f, all: true);
+        var x = p.X + S(9);
         if (dot)
         {
-            dl.AddCircleFilled(new Vector2(x + S(3), p.Y + h / 2), S(3.2f), Pal.U(color));
-            x += S(10);
+            Diamond(dl, new Vector2(x + S(3), p.Y + h / 2), S(3.6f), color);
+            x += S(11);
         }
         dl.AddText(UiEnv.Font(FontRole.Body, fs), fs, new Vector2(x, p.Y + (h - ts.Y) / 2), Pal.U(Pal.Mix(color, Pal.White, 0.55f)), text);
         ImGui.Dummy(new Vector2(w, h));
     }
 
-    public static float PillWidth(string text, bool dot = true) => Gfx.TextSize(FontRole.Body, S(13), text).X + S(dot ? 24 : 16);
+    public static float PillWidth(string text, bool dot = true) => Gfx.TextSize(FontRole.Body, S(13), text).X + S(dot ? 26 : 18);
+
+    /// <summary>A filled diamond (a square on its point).</summary>
+    public static void Diamond(ImDrawListPtr dl, Vector2 c, float r, Vector4 color, bool filled = true, float thickness = 1.2f)
+    {
+        var a = c + new Vector2(0, -r);
+        var b = c + new Vector2(r, 0);
+        var d = c + new Vector2(0, r);
+        var e = c + new Vector2(-r, 0);
+        if (filled) dl.AddQuadFilled(a, b, d, e, Pal.U(color));
+        else dl.AddQuad(a, b, d, e, Pal.U(color), thickness);
+    }
 
     /// <summary>An animated on/off switch with a label and optional description.</summary>
     public static bool Toggle(string label, ref bool value, string? description = null)
@@ -212,8 +249,9 @@ public static class W
         var visible = label.Split("##")[0];
         var p = ImGui.GetCursorScreenPos();
         var h = S(20);
-        var w = S(36);
+        var w = S(38);
         var textW = Gfx.TextSize(FontRole.Body, ImGui.GetFontSize(), visible).X;
+        var avail = Avail();
         var clicked = ImGui.InvisibleButton(label, new Vector2(w + S(10) + textW, h));
         if (clicked) value = !value;
         var hovered = ImGui.IsItemHovered();
@@ -221,16 +259,20 @@ public static class W
         k = Ease.Approach(k, value ? 1 : 0, 18);
         Switches[id] = k;
         var dl = ImGui.GetWindowDrawList();
-        var track = Pal.Mix(Pal.Panel3, Pal.Gold, k);
-        dl.AddRectFilled(p, p + new Vector2(w, h), Pal.U(hovered ? Pal.Lighten(track, 0.08f) : track), h / 2);
+        var max = p + new Vector2(w, h);
+        var cut = h * 0.3f;
+        var off = hovered ? Pal.Lighten(Pal.Panel3, 0.06f) : Pal.Panel3;
+        Gfx.ChamferPanel(dl, p, max, cut, Pal.Mix(off, Pal.AccentDeep, k), Pal.Mix(Pal.Darken(off, 0.2f), Pal.Darken(Pal.AccentDeep, 0.2f), k),
+            Pal.Mix(Pal.Line, Pal.Accent, k), 1f, all: true);
+        if (k > 0.05f) Gfx.ChamferGlow(dl, p, max, cut, Pal.Accent, S(6), k * 0.6f, all: true);
         var knob = new Vector2(p.X + h / 2 + (w - h) * k, p.Y + h / 2);
-        dl.AddCircleFilled(knob + new Vector2(0, S(1)), h / 2 - S(2), Pal.U(Pal.Black, 0.3f), 20);
-        dl.AddCircleFilled(knob, h / 2 - S(2.5f), Pal.U(Pal.Mix(Pal.Muted, Pal.White, k)), 20);
+        Diamond(dl, knob + new Vector2(0, S(1)), h * 0.42f, Pal.A(Pal.Black, 0.35f));
+        Diamond(dl, knob, h * 0.4f, Pal.Mix(Pal.Muted, Pal.White, k));
         dl.AddText(new Vector2(p.X + w + S(10), p.Y + (h - ImGui.GetTextLineHeight()) / 2), Pal.U(Pal.Text), visible);
         if (description != null)
         {
             ImGui.SetCursorScreenPos(new Vector2(p.X + w + S(10), p.Y + h + S(1)));
-            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + Math.Max(S(160), ImGui.GetContentRegionAvail().X - S(8)));
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + Math.Max(S(160), avail - w - S(10)));
             ImGui.PushStyleColor(ImGuiCol.Text, Pal.Muted);
             ImGui.TextWrapped(description);
             ImGui.PopStyleColor();
@@ -242,22 +284,22 @@ public static class W
     }
 
     /// <summary>Segmented control; returns true when the selection changed.</summary>
-    public static bool Segmented(string id, string[] options, ref int index, float width = 0)
+    public static bool Segmented(string id, string[] options, ref int index, float width = 0, int[]? badges = null)
     {
         var dl = ImGui.GetWindowDrawList();
         var p = ImGui.GetCursorScreenPos();
-        if (width <= 0) width = ImGui.GetContentRegionAvail().X;
-        var h = ImGui.GetFrameHeight() + S(2);
+        if (width <= 0) width = Avail();
+        var h = ImGui.GetFrameHeight() + S(4);
         var segW = width / options.Length;
-        dl.AddRectFilled(p, p + new Vector2(width, h), Pal.U(Pal.Panel), h / 2.6f);
-        dl.AddRect(p, p + new Vector2(width, h), Pal.U(Pal.Line), h / 2.6f);
+        Gfx.ChamferPanel(dl, p, p + new Vector2(width, h), S(8), Pal.Hex(0x0A0F21), Pal.Hex(0x0A0F21), Pal.Line);
         var key = ImGui.GetID(id);
         Switches.TryGetValue(key, out var slide);
         slide = Switches.ContainsKey(key) ? Ease.Approach(slide, index, 16) : index;
         Switches[key] = slide;
         var sMin = p + new Vector2(segW * slide + S(3), S(3));
-        Gfx.RoundedGradient(dl, sMin, sMin + new Vector2(segW - S(6), h - S(6)), h / 3, Pal.Hex(0x343F4D), Pal.Hex(0x2A333F));
-        dl.AddRect(sMin, sMin + new Vector2(segW - S(6), h - S(6)), Pal.U(Pal.Gold, 0.45f), h / 3);
+        var sMax = sMin + new Vector2(segW - S(6), h - S(6));
+        Gfx.ChamferPanel(dl, sMin, sMax, S(6), Pal.Hex(0x203063), Pal.Hex(0x162147));
+        Gfx.NeonLine(dl, new Vector2(sMin.X + S(8), sMax.Y - S(1)), new Vector2(sMax.X - S(8), sMax.Y - S(1)), Pal.Accent, S(1.5f), 0.7f);
         var changed = false;
         for (var i = 0; i < options.Length; i++)
         {
@@ -267,19 +309,27 @@ public static class W
                 index = i;
                 changed = true;
             }
-            if (ImGui.IsItemHovered()) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            var col = i == index ? Pal.Text : Pal.Muted;
-            Gfx.TextCentered(dl, FontRole.Body, ImGui.GetFontSize(), p + new Vector2(segW * (i + 0.5f), h / 2), Pal.U(col), options[i]);
+            var hovered = ImGui.IsItemHovered();
+            if (hovered) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            var col = i == index ? Pal.AccentLight : hovered ? Pal.Text : Pal.Muted;
+            var center = p + new Vector2(segW * (i + 0.5f), h / 2);
+            var ts = Gfx.TextCentered(dl, FontRole.Body, ImGui.GetFontSize(), center, Pal.U(col), options[i]);
+            if (badges != null && i < badges.Length && badges[i] > 0)
+            {
+                var bc = center + new Vector2(ts.X / 2 + S(9), -ts.Y * 0.28f);
+                dl.AddCircleFilled(bc, S(7.5f), Pal.U(Pal.Magenta), 16);
+                Gfx.TextCentered(dl, FontRole.Body, S(11), bc, Pal.U(Pal.White), badges[i] > 9 ? "9+" : badges[i].ToString());
+            }
         }
         ImGui.SetCursorScreenPos(p);
         ImGui.Dummy(new Vector2(width, h));
         return changed;
     }
 
-    /// <summary>A slim slider with a round knob and the value shown on the right. Returns true while it changes.</summary>
+    /// <summary>A slim slider with a diamond knob and the value shown on the right. Returns true while it changes.</summary>
     public static bool SliderL(string id, ref long value, long min, long max, Func<long, string> label, float width = 0, long step = 1)
     {
-        if (width <= 0) width = ImGui.GetContentRegionAvail().X;
+        if (width <= 0) width = Avail();
         var dl = ImGui.GetWindowDrawList();
         var p = ImGui.GetCursorScreenPos();
         var h = S(28);
@@ -318,18 +368,18 @@ public static class W
         var x0 = p.X + knobR;
         var x1 = p.X + trackW - knobR;
         var kx = x0 + (x1 - x0) * frac;
-        dl.AddRectFilled(new Vector2(x0, cy - S(3)), new Vector2(x1, cy + S(3)), Pal.U(Pal.Panel3), S(3));
-        dl.AddRectFilledMultiColor(new Vector2(x0, cy - S(3)), new Vector2(kx, cy + S(3)), Pal.U(Pal.GoldDark), Pal.U(Pal.Gold), Pal.U(Pal.Gold), Pal.U(Pal.GoldDark));
+        dl.AddRectFilled(new Vector2(x0, cy - S(2)), new Vector2(x1, cy + S(2)), Pal.U(Pal.Panel3));
+        dl.AddRectFilledMultiColor(new Vector2(x0, cy - S(2)), new Vector2(kx, cy + S(2)), Pal.U(Pal.AccentDeep), Pal.U(Pal.Accent), Pal.U(Pal.Accent), Pal.U(Pal.AccentDeep));
+        if (kx > x0 + 2) dl.AddLine(new Vector2(x0, cy), new Vector2(kx, cy), Pal.U(Pal.Accent, 0.18f), S(8));
         var hv = HoverAnim(ImGui.GetID(id), hovered || active);
-        if (hv > 0.01f) dl.AddCircleFilled(new Vector2(kx, cy), knobR + S(5) * hv, Pal.U(Pal.Gold, 0.15f * hv), 24);
-        dl.AddCircleFilled(new Vector2(kx, cy + S(1.5f)), knobR, Pal.U(Pal.Black, 0.4f), 24);
-        dl.AddCircleFilled(new Vector2(kx, cy), knobR, Pal.U(Pal.Hex(0xF4EEDD)), 24);
-        dl.AddCircle(new Vector2(kx, cy), knobR, Pal.U(Pal.Gold), 24, S(2));
+        if (hv > 0.01f) Diamond(dl, new Vector2(kx, cy), knobR + S(5) * hv, Pal.A(Pal.Accent, 0.16f * hv));
+        Diamond(dl, new Vector2(kx, cy + S(1.5f)), knobR, Pal.A(Pal.Black, 0.45f));
+        Diamond(dl, new Vector2(kx, cy), knobR, Pal.Hex(0xE8FBFF));
+        Diamond(dl, new Vector2(kx, cy), knobR, Pal.Accent, false, S(2));
 
         var lMin = new Vector2(p.X + trackW + S(10), p.Y);
         var lMax = new Vector2(p.X + width, p.Y + h);
-        dl.AddRectFilled(lMin, lMax, Pal.U(Pal.Panel2), S(8));
-        dl.AddRect(lMin, lMax, Pal.U(Pal.Line), S(8));
+        Gfx.ChamferPanel(dl, lMin, lMax, S(7), Pal.Panel2, Pal.Panel, Pal.Line);
         Gfx.TextCentered(dl, FontRole.Body, ImGui.GetFontSize(), (lMin + lMax) / 2, Pal.U(Pal.Text), text);
         ImGui.SetCursorScreenPos(p);
         ImGui.Dummy(new Vector2(width, h));
@@ -352,7 +402,7 @@ public static class W
         return true;
     }
 
-    /// <summary>Float slider over [min, max] in <paramref name="steps"/> increments.</summary>
+    /// <summary>Float slider over [min, max] in <paramref name="step"/> increments.</summary>
     public static bool SliderF(string id, ref float value, float min, float max, float step, Func<float, string> label, float width = 0)
     {
         var steps = (long)Math.Round((max - min) / step);
@@ -362,10 +412,10 @@ public static class W
         return true;
     }
 
-    /// <summary>"−  value  +" amount editor; returns true when changed.</summary>
+    /// <summary>"-  value  +" amount editor; returns true when changed.</summary>
     public static bool Stepper(string id, ref long value, long min, long max, long step, float width = 0, string suffix = "")
     {
-        if (width <= 0) width = ImGui.GetContentRegionAvail().X;
+        if (width <= 0) width = Avail();
         var h = ImGui.GetFrameHeight() + S(2);
         var changed = false;
         ImGui.PushID(id);
@@ -394,14 +444,15 @@ public static class W
         return changed;
     }
 
-    /// <summary>Upper-case caption.</summary>
+    /// <summary>Letter-spaced capitals.</summary>
     public static void Caption(string text)
     {
         var dl = ImGui.GetWindowDrawList();
         var p = ImGui.GetCursorScreenPos();
         var fs = S(12);
-        dl.AddText(UiEnv.Font(FontRole.Body, fs), fs, p, Pal.U(Pal.Muted), text.ToUpperInvariant());
-        ImGui.Dummy(new Vector2(Gfx.TextSize(FontRole.Body, fs, text.ToUpperInvariant()).X, fs + S(2)));
+        var up = text.ToUpperInvariant();
+        var size = Gfx.TextSpaced(dl, FontRole.Body, fs, p, Pal.U(Pal.Muted), up, S(0.9f));
+        ImGui.Dummy(new Vector2(size.X, fs + S(2)));
     }
 
     public static void Muted(string text)
@@ -421,13 +472,15 @@ public static class W
         ImGui.Dummy(new Vector2(ts.X, ts.Y));
     }
 
-    /// <summary>A rounded panel behind <paramref name="content"/>. Don't nest panels.</summary>
+    /// <summary>An angular glass panel behind <paramref name="content"/>. Don't nest panels.</summary>
     public static void Panel(string? title, Action content, Vector4? accent = null, float padding = 16)
     {
         var pad = S(padding);
         var dl = ImGui.GetWindowDrawList();
-        var width = ImGui.GetContentRegionAvail().X;
+        var width = Avail();
         var min = ImGui.GetCursorScreenPos();
+        var outerRight = _panelRight;
+        _panelRight = min.X + width - pad;
         dl.ChannelsSplit(2);
         dl.ChannelsSetCurrent(1);
         ImGui.Dummy(new Vector2(1, pad - ImGui.GetStyle().ItemSpacing.Y));
@@ -445,40 +498,61 @@ public static class W
         }
         finally
         {
+            _panelRight = outerRight;
             ImGui.PopItemWidth();
             ImGui.PopTextWrapPos();
             ImGui.Unindent(pad);
             ImGui.Dummy(new Vector2(1, pad - ImGui.GetStyle().ItemSpacing.Y));
             var max = new Vector2(min.X + width, ImGui.GetCursorScreenPos().Y);
             dl.ChannelsSetCurrent(0);
-            Gfx.RoundedGradient(dl, min, max, S(12), Pal.Hex(0x18202A), Pal.Hex(0x131920));
-            dl.AddRect(min, max, Pal.U(Pal.Line), S(12));
-            var a = accent ?? Pal.Gold;
-            dl.AddRectFilledMultiColor(min + new Vector2(S(14), 0), new Vector2(min.X + Math.Min(width - S(14), S(120)), min.Y + S(2)),
+            var cut = S(12);
+            Gfx.ChamferPanel(dl, min, max, cut, Pal.Hex(0x111936, 0.96f), Pal.Hex(0x0C1228, 0.96f), Pal.Line);
+            var a = accent ?? Pal.Accent;
+            // Neon bracket: the cut corner and a fading run along the top edge.
+            Gfx.NeonLine(dl, new Vector2(min.X, min.Y + cut), new Vector2(min.X + cut, min.Y), a, S(1.5f), 0.6f);
+            dl.AddRectFilledMultiColor(new Vector2(min.X + cut, min.Y - S(0.5f)), new Vector2(min.X + Math.Min(width - cut, S(140)), min.Y + S(1.5f)),
                 Pal.U(a), Pal.U(a with { W = 0 }), Pal.U(a with { W = 0 }), Pal.U(a));
             dl.ChannelsMerge();
         }
         ImGui.Dummy(new Vector2(1, S(4)));
     }
 
-    /// <summary>Row of seat dots: filled for taken seats.</summary>
+    /// <summary>
+    /// A floating glass panel over the city: dark translucent fill, hairline border, a soft shadow and a neon bracket on
+    /// the cut corner.
+    /// </summary>
+    public static void Glass(ImDrawListPtr dl, Vector2 min, Vector2 max, float cut = 0, Vector4? accent = null, float opacity = 1f)
+    {
+        if (cut <= 0) cut = S(14);
+        Gfx.Shadow(dl, min, max, S(4), S(12), 0.5f * opacity, new Vector2(0, S(5)));
+        Gfx.ChamferPanel(dl, min, max, cut, Pal.Hex(0x101838, 0.84f * opacity), Pal.Hex(0x070B1C, 0.92f * opacity), Pal.A(Pal.Hex(0x2B3A6E), opacity), 1f);
+        dl.AddLine(new Vector2(min.X + cut + 1, min.Y + 1.5f), new Vector2(max.X - 2, min.Y + 1.5f), Pal.U(Pal.White, 0.07f * opacity));
+        var a = accent ?? Pal.Accent;
+        Gfx.NeonLine(dl, new Vector2(min.X, min.Y + cut), new Vector2(min.X + cut, min.Y), Pal.A(a, opacity), S(1.6f), 0.7f);
+        dl.AddRectFilledMultiColor(new Vector2(min.X + cut, min.Y - S(0.5f)), new Vector2(min.X + Math.Min(max.X - min.X - cut, S(170)), min.Y + S(1.5f)),
+            Pal.U(a, opacity), Pal.U(a, 0), Pal.U(a, 0), Pal.U(a, opacity));
+        // A matching tick on the opposite cut corner.
+        Gfx.NeonLine(dl, new Vector2(max.X - cut, max.Y), new Vector2(max.X, max.Y - cut), Pal.A(Pal.Magenta, 0.55f * opacity), S(1.2f), 0.4f);
+    }
+
+    /// <summary>Row of seat markers: filled diamonds for taken seats.</summary>
     public static void SeatDots(int taken, int max)
     {
         var dl = ImGui.GetWindowDrawList();
         var p = ImGui.GetCursorScreenPos();
-        var r = S(4.5f);
+        var r = S(4.6f);
         var gap = S(13);
         for (var i = 0; i < max; i++)
         {
             var c = p + new Vector2(r + i * gap, ImGui.GetTextLineHeight() / 2);
-            if (i < taken) dl.AddCircleFilled(c, r, Pal.U(Pal.Gold), 16);
-            else dl.AddCircle(c, r - 0.5f, Pal.U(Pal.Muted, 0.6f), 16, 1.2f);
+            if (i < taken) Diamond(dl, c, r, Pal.Accent);
+            else Diamond(dl, c, r - 0.5f, Pal.A(Pal.Muted, 0.6f), false, 1.2f);
         }
         ImGui.Dummy(new Vector2(max * gap, ImGui.GetTextLineHeight()));
     }
 }
 
-/// <summary>Small vector icons (no icon font needed).</summary>
+// <summary>Small vector icons (no icon font needed).</summary>
 public static class Icons
 {
     public static void Draw(ImDrawListPtr dl, Icon icon, Vector2 c, float s, Vector4 color)

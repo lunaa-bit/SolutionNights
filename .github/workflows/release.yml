@@ -44,7 +44,7 @@ jobs:
 
       - name: Create release
         shell: pwsh
-        run: gh release create $env:VERSION SaucerNights.zip --title "Saucer Nights $env:VERSION" --generate-notes
+        run: gh release create $env:VERSION SaucerNights.zip --title "Solution Nights $env:VERSION" --generate-notes
 
       - name: Update repo.json
         shell: pwsh

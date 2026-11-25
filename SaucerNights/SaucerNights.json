@@ -1,21 +1,22 @@
 {
     "Author": "Birch",
-    "Name": "Saucer Nights",
+    "Name": "Solution Nights",
     "InternalName": "SaucerNights",
-    "Description": "Play blackjack and no-limit Texas Hold'em with friends over a cross-world linkshell. One player hosts and deals; everyone else joins from the lobby. Animated tables, encrypted hole cards, provably fair shuffles, practice tables against bots and a chip ledger for the host. Chips are play money: the plugin never trades gil.",
+    "Description": "Play blackjack, no-limit Texas Hold'em and European roulette with friends over a cross-world linkshell, at a neon table in the spirit of Solution Nine. One player hosts and deals; everyone else joins from the lobby. Animated tables, encrypted hole cards, provably fair shuffles, host-approved buy-backs, practice tables against bots, an adjustable interface size and a chip ledger for the host. Chips are play money: the plugin never trades gil. (Formerly Saucer Nights.)",
     "ApplicableVersion": "any",
-    "Punchline": "Blackjack and hold'em over your linkshell.",
+    "Punchline": "Blackjack, hold'em and roulette over your linkshell.",
     "Tags": [
         "cards",
         "poker",
         "blackjack",
+        "roulette",
         "casino",
         "linkshell",
         "social",
         "games"
     ],
-    "RepoUrl": "https://github.com/lunaa-bit/Saucer-Nights",
-    "IconUrl": "https://raw.githubusercontent.com/lunaa-bit/Saucer-Nights/main/images/icon.png",
+    "RepoUrl": "https://github.com/lunaa-bit/SolutionNights",
+    "IconUrl": "https://raw.githubusercontent.com/lunaa-bit/SolutionNights/main/images/icon.png",
     "AcceptsFeedback": false,
     "DalamudApiLevel": 15
 }

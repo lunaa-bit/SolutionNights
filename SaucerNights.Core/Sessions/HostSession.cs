@@ -11,8 +11,10 @@ public sealed class HostOptions
     public string HostId = string.Empty;
 
     public string HostName = string.Empty;
-    public string Title = "Saucer Nights";
-    public bool AutoApproveRebuys = true;
+    public string Title = "Solution Nights";
+
+    /// <summary>Practice tables top bots up by themselves; at real tables the host approves every rebuy.</summary>
+    public bool AutoApproveRebuys;
     public TimeSpan AnnounceInterval = TimeSpan.FromSeconds(50);
 }
 
@@ -36,6 +38,9 @@ public sealed class LedgerEntry
     public long CashedOut;
     public long Current;
     public bool Seated;
+
+    /// <summary>Chips the player walked away with. They get them back if they sit down again.</summary>
+    public long Banked;
 
     public long Net => CashedOut + Current - BuyIns;
 }
@@ -128,8 +133,14 @@ public sealed class HostSession : IDisposable
         {
             var f = TableFlags.None;
             if (!Closed && _players.Count < Game.MaxSeats) f |= TableFlags.Open;
-            if (Game.Kind == GameKind.Blackjack ? ((Blackjack.BlackjackEngine)Game).Rules.ProvablyFair : ((Poker.PokerEngine)Game).Rules.ProvablyFair)
-                f |= TableFlags.ProvablyFair;
+            var fair = Game switch
+            {
+                Blackjack.BlackjackEngine b => b.Rules.ProvablyFair,
+                Poker.PokerEngine pk => pk.Rules.ProvablyFair,
+                Roulette.RouletteEngine r => r.Rules.ProvablyFair,
+                _ => false,
+            };
+            if (fair) f |= TableFlags.ProvablyFair;
             if (Game is Poker.PokerEngine pe && pe.Rules.HostPlays) f |= TableFlags.HostPlays;
             if (Game.InRound) f |= TableFlags.InProgress;
             if (Game.Paused) f |= TableFlags.Paused;
@@ -192,6 +203,9 @@ public sealed class HostSession : IDisposable
                 break;
             case BetMsg b:
                 Game.OnBet(p.Seat, b, now);
+                break;
+            case RouletteBetMsg rb when Game is Roulette.RouletteEngine re:
+                re.OnRouletteBet(p.Seat, rb, now);
                 break;
             case ReadyMsg r:
                 Game.OnReady(p.Seat, r, now);
@@ -259,14 +273,26 @@ public sealed class HostSession : IDisposable
         var name = DisplayName(sender);
         var p = new TablePlayer { Id = sender, Name = name, Seat = seat, SharedKey = key, Nonce = join.Nonce, JoinedAt = now, LastSeen = now };
         _players[sender] = p;
-        var stack = Game.StartingStack;
-        if (!_ledger.TryGetValue(sender, out var entry)) _ledger[sender] = entry = new LedgerEntry { Id = sender, Name = name };
-        entry.BuyIns += stack;
+        long stack;
+        if (_ledger.TryGetValue(sender, out var entry))
+        {
+            // Coming back: the chips they left with follow them. Buying back in takes the host's approval.
+            stack = entry.Banked;
+            entry.CashedOut -= stack;
+            entry.Banked = 0;
+        }
+        else
+        {
+            _ledger[sender] = entry = new LedgerEntry { Id = sender, Name = name };
+            stack = Game.StartingStack;
+            entry.BuyIns += stack;
+        }
         Game.Seat(seat, stack, now);
         AddEvent(new TableEvent(EventKind.Joined, (byte)seat, stack));
         RosterChanged();
         QueueWelcome(p);
-        Notice?.Invoke($"{name} sat down at seat {seat + 1}.");
+        Notice?.Invoke(stack > 0 ? $"{name} sat down at seat {seat + 1}." : $"{name} is back at seat {seat + 1} with no chips.");
+        if (stack <= 0) RequestRebuy(p, now);
         Sync();
     }
 
@@ -283,10 +309,16 @@ public sealed class HostSession : IDisposable
 
     private void RosterChanged()
     {
+        RosterFlagsChanged();
+        _announceRequested = true;
+    }
+
+    /// <summary>A roster flag changed (a rebuy asked for or settled): new roster version, no new announcement.</summary>
+    private void RosterFlagsChanged()
+    {
         _rosterVersion = (byte)(_rosterVersion == 255 ? 1 : _rosterVersion + 1);
         _rosterDirtyChat = _rosterDirtyLocal = true;
         _stateDirtyChat = _stateDirtyLocal = true;
-        _announceRequested = true;
     }
 
     private void AddEvent(TableEvent e)
@@ -301,16 +333,24 @@ public sealed class HostSession : IDisposable
         var chips = Game.Unseat(p.Seat, now);
         _players.Remove(p.Id);
         _rebuys.RemoveAll(r => r.Id == p.Id);
-        if (_ledger.TryGetValue(p.Id, out var e)) e.CashedOut += chips;
+        if (_ledger.TryGetValue(p.Id, out var e))
+        {
+            e.CashedOut += chips;
+            e.Banked = chips;
+        }
         AddEvent(new TableEvent(why, (byte)p.Seat, chips));
         RosterChanged();
         Notice?.Invoke(why == EventKind.Kicked ? $"{p.Name} was removed from the table." : $"{p.Name} left with {chips:N0} chips.");
         Sync();
     }
 
+    /// <summary>Chips a rebuy would add for this player: back up to the starting stack.</summary>
+    public long RebuyAmount(string id) => _players.TryGetValue(id, out var p) ? Math.Max(0, Game.StartingStack - Game.StackOf(p.Seat)) : 0;
+
     private void RequestRebuy(TablePlayer p, DateTime now)
     {
-        if (Game.StackOf(p.Seat) >= Game.StartingStack) return;
+        var amount = Game.StartingStack - Game.StackOf(p.Seat);
+        if (amount <= 0) return;
         if (Options.AutoApproveRebuys)
         {
             ApplyRebuy(p);
@@ -318,13 +358,15 @@ public sealed class HostSession : IDisposable
         }
         if (_rebuys.Any(r => r.Id == p.Id)) return;
         _rebuys.Add(new RebuyRequest { Id = p.Id, Name = p.Name, Seat = p.Seat, At = now });
-        Notice?.Invoke($"{p.Name} asked for a rebuy.");
+        AddEvent(new TableEvent(EventKind.RebuyAsked, (byte)p.Seat, amount));
+        RosterFlagsChanged();
+        Notice?.Invoke($"{p.Name} wants to buy back in for {amount:N0}.");
     }
 
     private void ApplyRebuy(TablePlayer p)
     {
         var amount = Game.StartingStack - Game.StackOf(p.Seat);
-        _rebuys.RemoveAll(r => r.Id == p.Id);
+        if (_rebuys.RemoveAll(r => r.Id == p.Id) > 0) RosterFlagsChanged();
         if (amount <= 0) return;
         Game.AddChips(p.Seat, amount);
         if (_ledger.TryGetValue(p.Id, out var e)) e.BuyIns += amount;
@@ -340,7 +382,14 @@ public sealed class HostSession : IDisposable
         if (_players.TryGetValue(id, out var p)) ApplyRebuy(p);
     }
 
-    public void DenyRebuy(string id) => _rebuys.RemoveAll(r => r.Id == id);
+    public void DenyRebuy(string id)
+    {
+        if (_rebuys.RemoveAll(r => r.Id == id) == 0 || !_players.TryGetValue(id, out var p)) return;
+        AddEvent(new TableEvent(EventKind.RebuyDenied, (byte)p.Seat, 0));
+        RosterFlagsChanged();
+        Notice?.Invoke($"You turned down {p.Name}'s rebuy.");
+        Sync();
+    }
 
     public void Kick(int seat, bool ban)
     {
@@ -424,7 +473,8 @@ public sealed class HostSession : IDisposable
         Entries = _players.Values.OrderBy(p => p.Seat)
             .Select(p => new RosterEntry((byte)p.Seat, p.Name,
                 (string.Equals(p.Id, HostId, StringComparison.OrdinalIgnoreCase) ? RosterFlags.Host : RosterFlags.None)
-                | (Game.IsSittingOut(p.Seat) ? RosterFlags.SittingOut : RosterFlags.None)))
+                | (Game.IsSittingOut(p.Seat) ? RosterFlags.SittingOut : RosterFlags.None)
+                | (_rebuys.Any(r => r.Id == p.Id) ? RosterFlags.RebuyPending : RosterFlags.None)))
             .ToList(),
     };
 

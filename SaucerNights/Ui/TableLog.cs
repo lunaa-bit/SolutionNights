@@ -61,13 +61,15 @@ public sealed partial class TableLog
                 EventKind.Kicked => ($"{who} was removed by the host", LogTone.Bad),
                 EventKind.SatOut => ($"{who} is sitting out", LogTone.Muted),
                 EventKind.SatIn => ($"{who} is back", LogTone.Muted),
-                EventKind.Rebuy => ($"{who} rebought for {amount}", LogTone.Muted),
+                EventKind.Rebuy => ($"{who} bought back in for {amount}", LogTone.Good),
+                EventKind.RebuyAsked => ($"{who} asked the host for a rebuy ({amount})", LogTone.Muted),
+                EventKind.RebuyDenied => ($"The host turned down {who}'s rebuy", LogTone.Bad),
                 EventKind.ChipsAdjusted => (e.Extra == 1 ? $"The host gave {who} {amount} chips" : $"The host took {amount} chips from {who}", LogTone.Muted),
                 EventKind.Paused => ("The host paused the table", LogTone.Header),
                 EventKind.Resumed => ("The host resumed the table", LogTone.Header),
                 EventKind.Timeout => ($"{who} ran out of time", LogTone.Bad),
 
-                EventKind.BettingOpen => ($"Round {amount}", LogTone.Header),
+                EventKind.BettingOpen => ($"{(s.Table.Game == GameKind.Roulette ? "Spin" : "Round")} {amount}", LogTone.Header),
                 EventKind.BetPlaced => ($"{who} bets {amount}", LogTone.Normal),
                 EventKind.Hit => ($"{who} hits {C(new Card(e.Extra))} ({e.Amount})", LogTone.Normal),
                 EventKind.Stand => ($"{who} stands on {e.Amount}", LogTone.Normal),
@@ -103,6 +105,11 @@ public sealed partial class TableLog
                 EventKind.WinPot => (e.Extra == 255 ? $"{who} wins {amount}" : $"{who} wins {amount} with {HandEvaluator.CategoryName((HandCategory)e.Extra).ToLowerInvariant()}", LogTone.Gold),
                 EventKind.ShowCards => ($"{who} shows {C(new Card((byte)(e.Amount & 0xFF)))} {C(new Card((byte)((e.Amount >> 8) & 0xFF)))}", LogTone.Normal),
                 EventKind.UncalledReturned => ($"{amount} returned to {who}", LogTone.Muted),
+                EventKind.RouletteBets => (e.Amount > 0 ? $"{who} has {amount} on {e.Extra} spot{(e.Extra == 1 ? "" : "s")}" : $"{who} takes their bets back", LogTone.Normal),
+                EventKind.NoMoreBets => ("No more bets", LogTone.Header),
+                EventKind.RouletteResult => ($"{e.Amount} {(e.Amount == 0 ? "green" : RouletteArt.IsRed((int)e.Amount) ? "red" : "black")}", LogTone.Header),
+                EventKind.RouletteWin => ($"{who} collects {amount}", LogTone.Good),
+                EventKind.RouletteLose => ($"{who} loses {amount}", LogTone.Bad),
                 _ => null,
             };
             if (line is { } l) Add(u.At, l.Text, l.Tone);
@@ -131,7 +138,7 @@ public sealed partial class TableLog
             LogTone.Good => Pal.Green,
             LogTone.Bad => Pal.Mix(Pal.Red, Pal.Text, 0.25f),
             LogTone.Gold => Pal.GoldLight,
-            LogTone.Header => Pal.Gold,
+            LogTone.Header => Pal.Accent,
             _ => Pal.Text,
         };
         if (line.Tone == LogTone.Header)
@@ -141,18 +148,25 @@ public sealed partial class TableLog
             var rich = CardToken().IsMatch(line.Text);
             if (!rich)
             {
-                dl.AddLine(new Vector2(p.X, y), new Vector2(p.X + (width - ts.X) / 2 - UiEnv.S(8), y), Pal.U(Pal.Gold, 0.3f));
-                dl.AddLine(new Vector2(p.X + (width + ts.X) / 2 + UiEnv.S(8), y), new Vector2(p.X + width, y), Pal.U(Pal.Gold, 0.3f));
+                dl.AddLine(new Vector2(p.X, y), new Vector2(p.X + (width - ts.X) / 2 - UiEnv.S(8), y), Pal.U(Pal.Accent, 0.3f));
+                dl.AddLine(new Vector2(p.X + (width + ts.X) / 2 + UiEnv.S(8), y), new Vector2(p.X + width, y), Pal.U(Pal.Accent, 0.3f));
                 dl.AddText(UiEnv.Font(FontRole.Body, fs * 0.85f), fs * 0.85f, new Vector2(p.X + (width - ts.X) / 2, y - ts.Y / 2), Pal.U(col), line.Text.ToUpperInvariant());
                 ImGui.Dummy(new Vector2(width, fs * 1.5f));
                 return;
             }
         }
 
-        // Tokenise into words and cards, then lay out with wrapping.
+        // A small marker for lines that matter, then words and cards laid out with wrapping.
+        var indent = UiEnv.S(14);
+        var lineH = fs * 1.35f;
+        if (line.Tone is LogTone.Good or LogTone.Bad or LogTone.Gold || line.Tone == LogTone.Header)
+            W.Diamond(dl, p + new Vector2(UiEnv.S(4), lineH / 2), UiEnv.S(3.5f), col);
+        else
+            dl.AddCircleFilled(p + new Vector2(UiEnv.S(4), lineH / 2), UiEnv.S(1.5f), Pal.U(Pal.Faint), 8);
+        p.X += indent;
+        width -= indent;
         var x = 0f;
         var row = 0;
-        var lineH = fs * 1.35f;
         var pos = 0;
         foreach (Match m in CardToken().Matches(line.Text))
         {
@@ -192,7 +206,7 @@ public sealed partial class TableLog
     {
         var size = new Vector2(fs * 1.9f, fs * 1.3f);
         var min = p + new Vector2(0, (fs * 1.35f - size.Y) / 2);
-        dl.AddRectFilled(min, min + size, Pal.U(Pal.Hex(0xF6F2E8)), UiEnv.S(3));
+        dl.AddRectFilled(min, min + size, Pal.U(Pal.Hex(0xF4F7FF)), UiEnv.S(2));
         var ink = CardArt.Ink(card.Suit);
         var rank = card.Rank == 10 ? "10" : card.RankText;
         var ts = Gfx.TextSize(FontRole.Body, fs * 0.9f, rank);

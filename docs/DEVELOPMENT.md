@@ -1,4 +1,7 @@
-# Developing Saucer Nights
+# Developing Solution Nights
+
+The plugin's internal name (and the C# projects) are still `SaucerNights`, its name before 1.1, so existing installs
+keep updating.
 
 ## Requirements
 
@@ -33,11 +36,17 @@ plugin.
 
 ```
 dotnet test SaucerNights.Tests
-dotnet run --project SaucerNights.Preview -- <outDir> [lobby host settings bj-turn pk-showdown pk-show icon ...]
+dotnet run --project SaucerNights.Preview -- <outDir> [--scale=1.25] [intro lobby host settings bj-turn pk-showdown rebuy-host pk-show rl-bet rl-spin rl-settle rl-host roulette-art icon ...]
+dotnet run --project SaucerNights.Preview -- <outDir> [--scale=1.25] soak=24
 ```
 
+`soak=N` plays N long practice sessions (hold'em, blackjack and roulette in turn, one to six bots, a bot in your own seat,
+every felt and card back), drawing every frame of the real table window. It fails if anything throws, chips stop
+adding up or play stalls, and saves a snapshot every 20 seconds of table time plus 3x3 contact sheets for review.
+
 The tests cover hand evaluation, every blackjack rule path, side pots and raise rules, the chat codec and
-fragmentation, key exchange and sealing, shuffle uniformity, showing cards, the fairness reveal, and multi-minute
+fragmentation, key exchange and sealing, shuffle uniformity, showing cards, the fairness reveal, host-approved
+buy-backs (and coming back with the chips you left with), and multi-minute
 simulated games (with 5% of lines lost) that check chip conservation, private cards and fairness verification.
 `HubTests` runs several plugin instances against one fake linkshell: discovery, joining, host-plays poker, watchers,
 leaving and closing.
@@ -51,8 +60,8 @@ launching the game. The screenshots in `docs/screenshots/` and `images/icon.png`
 2. Commit, then push a tag with the same four-part version:
 
    ```
-   git tag 1.0.1.0
-   git push origin 1.0.1.0
+   git tag 1.1.0.0
+   git push origin 1.1.0.0
    ```
 
 3. The *Release* workflow tests and builds the plugin, creates a GitHub release with `SaucerNights.zip`, and updates

@@ -2,6 +2,7 @@ using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Net;
 using SaucerNights.Core.Poker;
 using SaucerNights.Core.Protocol;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Sessions;
 
 namespace SaucerNights.App;
@@ -115,6 +116,14 @@ public sealed class GameApp : IDisposable
                     if (Settings.WinSound) Bridge.PlaySound(Settings.WinSoundEffect);
                 }
             }
+            else if (t.Roulette is { } r)
+            {
+                if (r.Phase == RoulettePhase.Settled && r.Seat(t.MySeat) is { RoundNet: > 0 } && _lastWinRound != r.Round)
+                {
+                    _lastWinRound = r.Round;
+                    if (Settings.WinSound) Bridge.PlaySound(Settings.WinSoundEffect);
+                }
+            }
             else if (t.Poker is { } p)
             {
                 mine = p.BettingRound && p.ActiveSeat == t.MySeat;
@@ -161,11 +170,18 @@ public sealed class GameApp : IDisposable
         TableOpened?.Invoke();
     }
 
+    public void HostRoulette()
+    {
+        if (HostingBlocks()) return;
+        var rules = Settings.Roulette.Normalized();
+        Hub.HostTable(new RouletteEngine(rules), Options("Roulette"));
+        TableOpened?.Invoke();
+    }
+
     private HostOptions Options(string game) => new()
     {
         HostName = Bridge.SelfName,
         Title = string.IsNullOrWhiteSpace(Settings.TableTitle) ? $"{Bridge.SelfName}'s {game}" : Settings.TableTitle.Trim(),
-        AutoApproveRebuys = Settings.AutoApproveRebuys,
     };
 
     public void Join(TableInfo table, bool spectate)
@@ -180,7 +196,7 @@ public sealed class GameApp : IDisposable
         if (HostingBlocks()) return;
         var poker = Settings.Poker.Normalized();
         poker.AutoStart = true;
-        Hub.StartPractice(kind, Math.Clamp(Settings.PracticeBots, 1, 6), Tweak(Settings.Blackjack.Normalized()), poker);
+        Hub.StartPractice(kind, Math.Clamp(Settings.PracticeBots, 1, 6), Tweak(Settings.Blackjack.Normalized()), poker, Settings.Roulette.Normalized());
         TableOpened?.Invoke();
     }
 

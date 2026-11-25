@@ -55,7 +55,7 @@ public sealed class TableAnimator
     }
 
     private static readonly Vector4[] ConfettiColors =
-        [Pal.Gold, Pal.GoldLight, Pal.Red, Pal.Green, Pal.Blue, Pal.Purple, Pal.White, Pal.Hex(0xFF7AB6)];
+        [Pal.Gold, Pal.GoldLight, Pal.Accent, Pal.AccentLight, Pal.Magenta, Pal.Violet, Pal.White, Pal.Green];
 
     private readonly Dictionary<string, Tracked> _cards = new();
     private readonly List<Ghost> _ghosts = [];
@@ -299,7 +299,7 @@ public sealed class TableAnimator
 
         // Band fading out at both ends.
         var edge = bandW * 0.22f;
-        var dark = Pal.Hex(0x07090C, 0.86f * alpha);
+        var dark = Pal.Hex(0x060A1C, 0.88f * alpha);
         var clear = dark with { W = 0 };
         dl.AddRectFilledMultiColor(bMin, new Vector2(bMin.X + edge, bMax.Y), Pal.U(clear), Pal.U(dark), Pal.U(dark), Pal.U(clear));
         dl.AddRectFilled(new Vector2(bMin.X + edge, bMin.Y), new Vector2(bMax.X - edge, bMax.Y), Pal.U(dark));
@@ -312,10 +312,7 @@ public sealed class TableAnimator
         }
 
         var titleY = b.Sub.Length > 0 ? c.Y - bandH * 0.12f : c.Y;
-        // Soft glow behind the title.
-        for (var i = 3; i >= 1; i--)
-            Gfx.TextCentered(dl, FontRole.Display, titleSize, new Vector2(c.X, titleY) + new Vector2(0, i), Pal.U(b.Color, 0.12f * alpha), b.Title);
-        Gfx.TextCentered(dl, FontRole.Display, titleSize, new Vector2(c.X, titleY), Pal.U(Pal.Lighten(b.Color, 0.35f), alpha), b.Title, 0.7f);
+        Gfx.TextGlow(dl, FontRole.Display, titleSize, new Vector2(c.X, titleY), b.Color, b.Title, 1.5f, alpha);
         if (b.Sub.Length > 0)
             Gfx.TextCentered(dl, FontRole.Heading, UiEnv.S(22) * scale, new Vector2(c.X, c.Y + bandH * 0.3f), Pal.U(Pal.Text, 0.92f * alpha), b.Sub);
     }

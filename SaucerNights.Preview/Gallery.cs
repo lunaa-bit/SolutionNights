@@ -46,9 +46,9 @@ internal static class Gallery
         ChipArt.Stack(dl, new Vector2(650, 640), 48_500, 22);
         ChipArt.Pill(dl, new Vector2(900, 620), 12_345, 17);
         ChipArt.Pill(dl, new Vector2(900, 670), 250, 17);
-        CardArt.Clover(dl, new Vector2(1100, 640), 80, Pal.Gold);
-        CardArt.Clover(dl, new Vector2(1000, 560), 40, Pal.GoldLight);
-        CardArt.Clover(dl, new Vector2(1060, 560), 20, Pal.GoldLight);
+        Logo.Mark(dl, new Vector2(1100, 640), 80, Pal.Accent, Pal.Hex(0x0B1530));
+        Logo.Mark(dl, new Vector2(1000, 560), 40, Pal.Magenta);
+        Logo.Mark(dl, new Vector2(1060, 560), 20, Pal.Gold);
         Gfx.TextCentered(dl, FontRole.Display, 54, new Vector2(1000, 760), Pal.U(Pal.GoldLight), "BLACKJACK!", 0.6f);
         ImGui.End();
     }

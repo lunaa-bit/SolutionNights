@@ -95,6 +95,7 @@ public static class Fair
 
     private static readonly byte[] CommitLabel = "SaucerNights/commit/v1"u8.ToArray();
     private static readonly byte[] DeckLabel = "SaucerNights/deck/v1"u8.ToArray();
+    private static readonly byte[] SpinLabel = "SaucerNights/roulette/v1"u8.ToArray();
 
     public static byte[] NewServerSeed() => RandomNumberGenerator.GetBytes(ServerSeedSize);
 
@@ -147,6 +148,25 @@ public static class Fair
         }
         return cards;
     }
+
+    /// <summary>Roulette: key for one spin, built like <see cref="DeckKey"/> under its own label.</summary>
+    public static byte[] SpinKey(ReadOnlySpan<byte> serverSeed, ushort tableId, long round, IEnumerable<SeatSeed> clientSeeds)
+    {
+        var w = new ByteWriter();
+        w.Bytes(SpinLabel);
+        w.U16(tableId);
+        w.VarU((ulong)round);
+        foreach (var s in clientSeeds.OrderBy(s => s.Seat))
+        {
+            w.U8(s.Seat);
+            w.Blob(s.Seed);
+        }
+        return HMACSHA256.HashData(serverSeed, w.ToArray());
+    }
+
+    /// <summary>Roulette: the winning number (0–36) for a spin, drawn from <see cref="FairRng"/> with rejection sampling.</summary>
+    public static int RouletteNumber(ReadOnlySpan<byte> serverSeed, ushort tableId, long round, IEnumerable<SeatSeed> clientSeeds) =>
+        new FairRng(SpinKey(serverSeed, tableId, round, clientSeeds)).NextInt(37);
 
     public static Card[] Deck(FairReveal reveal, ushort tableId, long round, int decks) =>
         Shuffle(DeckKey(reveal.ServerSeed, tableId, round, reveal.ClientSeeds), decks);

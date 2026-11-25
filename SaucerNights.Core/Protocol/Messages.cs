@@ -1,6 +1,7 @@
 using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Crypto;
 using SaucerNights.Core.Poker;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Wire;
 
 namespace SaucerNights.Core.Protocol;
@@ -8,13 +9,14 @@ namespace SaucerNights.Core.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>Bumped whenever the wire format changes incompatibly.</summary>
-    public const byte Version = 1;
+    public const byte Version = 2;
 }
 
 public enum GameKind : byte
 {
     Blackjack = 1,
     Poker = 2,
+    Roulette = 3,
 }
 
 public enum MessageType : byte
@@ -29,6 +31,7 @@ public enum MessageType : byte
     Resync = 7,
     Rebuy = 8,
     SitOut = 9,
+    RouletteBet = 10,
 
     // Host → everyone
     Announce = 32,
@@ -111,6 +114,7 @@ public static class Messages
                 MessageType.Resync => ResyncMsg.Read(r),
                 MessageType.Rebuy => new RebuyMsg(),
                 MessageType.SitOut => SitOutMsg.Read(r),
+                MessageType.RouletteBet => RouletteBetMsg.Read(r),
                 MessageType.Announce => AnnounceMsg.Read(r),
                 MessageType.Welcome => WelcomeMsg.Read(r),
                 MessageType.Reject => RejectMsg.Read(r),
@@ -270,6 +274,40 @@ public sealed class SitOutMsg : IMessage
     public static SitOutMsg Read(ByteReader r) => new() { SitOut = r.Bool() };
 }
 
+/// <summary>
+/// Roulette: every bet the player wants on the layout this spin (bet index, chips), with their seed for the result.
+/// It replaces whatever they had down, so a lost or repeated line is harmless; an empty list takes everything back.
+/// </summary>
+public sealed class RouletteBetMsg : IMessage
+{
+    public long Round;
+    public byte[] Seed = [];
+    public List<(byte Index, long Amount)> Bets = [];
+
+    public MessageType Type => MessageType.RouletteBet;
+
+    public void Write(ByteWriter w)
+    {
+        w.VarU(Round);
+        w.Bytes(Seed.AsSpan(0, Fairness.Fair.ClientSeedSize));
+        var n = Math.Min(Bets.Count, 255);
+        w.U8(n);
+        for (var i = 0; i < n; i++)
+        {
+            w.U8(Bets[i].Index);
+            w.VarU(Bets[i].Amount);
+        }
+    }
+
+    public static RouletteBetMsg Read(ByteReader r)
+    {
+        var m = new RouletteBetMsg { Round = r.VarL(), Seed = r.Fixed(Fairness.Fair.ClientSeedSize) };
+        var n = r.U8();
+        for (var i = 0; i < n; i++) m.Bets.Add((r.U8(), r.VarL()));
+        return m;
+    }
+}
+
 // ───────────────────────────── Host → everyone ─────────────────────────────
 
 /// <summary>Lobby advertisement; also the host's heartbeat.</summary>
@@ -313,6 +351,8 @@ public sealed class AnnounceMsg : IMessage
     public BlackjackRules? BlackjackRules => Game == GameKind.Blackjack ? Blackjack.BlackjackRules.FromBytes(Rules) : null;
 
     public PokerRules? PokerRules => Game == GameKind.Poker ? Poker.PokerRules.FromBytes(Rules) : null;
+
+    public RouletteRules? RouletteRules => Game == GameKind.Roulette ? Roulette.RouletteRules.FromBytes(Rules) : null;
 }
 
 public sealed class WelcomeMsg : IMessage
@@ -356,6 +396,9 @@ public enum RosterFlags : byte
     Host = 1,
     SittingOut = 2,
     Away = 4,
+
+    /// <summary>Asked for a rebuy; waiting for the host.</summary>
+    RebuyPending = 8,
 }
 
 public sealed record RosterEntry(byte Seat, string Name, RosterFlags Flags);
@@ -403,6 +446,7 @@ public sealed class StateMsg : IMessage
     public List<TableEvent> Events = [];
     public BlackjackView? Blackjack;
     public PokerView? Poker;
+    public RouletteView? Roulette;
 
     public MessageType Type => MessageType.State;
 
@@ -416,8 +460,18 @@ public sealed class StateMsg : IMessage
         var events = Events.Count > MaxEvents ? Events.Skip(Events.Count - MaxEvents).ToList() : Events;
         w.U8(events.Count);
         foreach (var e in events) e.Write(w);
-        if (Game == GameKind.Blackjack) Blackjack!.Write(w);
-        else Poker!.Write(w);
+        switch (Game)
+        {
+            case GameKind.Blackjack:
+                Blackjack!.Write(w);
+                break;
+            case GameKind.Roulette:
+                Roulette!.Write(w);
+                break;
+            default:
+                Poker!.Write(w);
+                break;
+        }
     }
 
     public static StateMsg Read(ByteReader r)
@@ -432,6 +486,9 @@ public sealed class StateMsg : IMessage
                 break;
             case GameKind.Poker:
                 m.Poker = PokerView.Read(r);
+                break;
+            case GameKind.Roulette:
+                m.Roulette = RouletteView.Read(r);
                 break;
             default:
                 throw new ProtocolException("Unknown game.");
@@ -473,6 +530,8 @@ public enum EventKind : byte
     Paused = 8,
     Resumed = 9,
     Timeout = 10,
+    RebuyAsked = 11,
+    RebuyDenied = 12,
 
     // Blackjack
     BettingOpen = 20,
@@ -515,6 +574,23 @@ public enum EventKind : byte
 
     /// <summary>A player chose to show their cards after the hand. Amount = card codes (low byte, next byte); Extra = 1 if they had folded.</summary>
     ShowCards = 66,
+
+    // Roulette (BettingOpen, SatOut/SatIn, Paused/Resumed are shared with the other games)
+
+    /// <summary>A player changed their bets. Amount = their chips now on the layout (0 = all taken back); Extra = spots covered.</summary>
+    RouletteBets = 70,
+
+    /// <summary>Betting closed and the wheel is turning. Amount = chips on the layout; Extra = players with bets.</summary>
+    NoMoreBets = 71,
+
+    /// <summary>The ball landed. Amount = the winning number (0–36).</summary>
+    RouletteResult = 72,
+
+    /// <summary>A player won on at least one spot. Amount = chips paid back (stakes on winning spots plus winnings); Extra = winning spots.</summary>
+    RouletteWin = 73,
+
+    /// <summary>A player won nothing this spin. Amount = chips lost; Extra = spots they had covered.</summary>
+    RouletteLose = 74,
 }
 
 /// <summary>Something that happened at the table — drives the log, sounds and animations.</summary>

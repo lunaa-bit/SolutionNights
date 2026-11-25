@@ -38,7 +38,8 @@ public sealed class PokerScene
         var k = ((seat - g.Me) % g.Seats + g.Seats) % g.Seats;
         var theta = MathF.PI / 2 + k * MathF.Tau / g.Seats;
         var p = g.C + new Vector2(MathF.Cos(theta) * g.SeatRadii.X, MathF.Sin(theta) * g.SeatRadii.Y);
-        var half = SeatArt.Size.X / 2 + S(6);
+        // Room for the hexagon avatar, which overhangs the plate's left edge.
+        var half = SeatArt.Size.X / 2 + S(16);
         p.X = Math.Clamp(p.X, g.Min.X + half, g.Max.X - half);
         p.Y = Math.Clamp(p.Y, g.Min.Y + SeatArt.Size.Y / 2 + S(16), g.Max.Y - SeatArt.Size.Y / 2 - S(4));
         return p;
@@ -65,16 +66,15 @@ public sealed class PokerScene
         _a.Discard = g.Origin;
         _a.BannerY = 0.25f;
 
-        TableArt.Backdrop(dl, min, max);
-        var felt = TableArt.PokerTable(dl, c, half, app.Settings.Felt);
-        TableArt.FeltMark(dl, c + new Vector2(0, boardH * 0.92f), Math.Min(half.Y * 0.16f, S(26)), app.Settings.Felt, "SAUCER NIGHTS");
+        TableArt.PokerTable(dl, c, half, app.Settings.Felt, now);
+        TableArt.FeltMark(dl, c + new Vector2(0, boardH * 0.92f), Math.Min(half.Y * 0.15f, S(24)), app.Settings.Felt, "SOLUTION NIGHTS");
 
         _a.BeginFrame();
         _a.DrawFeltLayer(dl, now);
 
         if (v == null)
         {
-            Gfx.TextCentered(dl, FontRole.Heading, S(28), c, Pal.U(Pal.Text, 0.7f), "Connecting to the table...");
+            Gfx.TextGlow(dl, FontRole.Heading, S(28), c, Pal.Accent, "CONNECTING TO THE TABLE...", 0.8f, 0.8f);
             _a.EndFrame(now);
             return;
         }
@@ -95,7 +95,7 @@ public sealed class PokerScene
             PokerPhase.Starting => "SHUFFLING...",
             _ => null,
         };
-        if (msg != null) Gfx.TextCentered(dl, FontRole.Heading, S(24), c - new Vector2(0, S(6)), Pal.U(Pal.Text, 0.55f), msg, 0.5f);
+        if (msg != null) Gfx.TextGlow(dl, FontRole.Heading, S(24), c - new Vector2(0, S(6)), TableArt.Felt(app.Settings.Felt).Neon, msg, 0.7f, 0.75f);
 
         _a.EndFrame(now);
         _a.DrawOverlay(dl, min, max, now);
@@ -169,10 +169,13 @@ public sealed class PokerScene
         {
             var perp = new Vector2(-toCenter.Y, toCenter.X);
             var bp = pos + toCenter * (EdgeDistance(toCenter) + S(16)) + perp * (SeatArt.Size.X * 0.5f + S(4));
-            dl.AddCircleFilled(bp + new Vector2(0, S(2)), S(12), Pal.U(Pal.Black, 0.45f), 24);
-            dl.AddCircleFilled(bp, S(11.5f), Pal.U(Pal.Hex(0xF4F1EA)), 24);
-            dl.AddCircle(bp, S(9), Pal.U(Pal.Hex(0xB8B0A0)), 24, S(1));
-            Gfx.TextCentered(dl, FontRole.Heading, S(15), bp + new Vector2(0, S(1)), Pal.U(Pal.Hex(0x1A1A1A)), "D");
+            Span<Vector2> hex = stackalloc Vector2[6];
+            Gfx.Hexagon(hex, bp + new Vector2(0, S(2)), S(13));
+            Gfx.FillConvex(dl, hex, Pal.U(Pal.Black, 0.5f));
+            Gfx.Hexagon(hex, bp, S(12.5f));
+            Gfx.FillVertical(dl, hex, Pal.Hex(0xFFFFFF), Pal.Hex(0xD5DEF2));
+            Gfx.Outline(dl, hex, Pal.U(Pal.Accent), S(1.6f));
+            Gfx.TextCentered(dl, FontRole.Heading, S(15), bp + new Vector2(0, S(1)), Pal.U(Pal.Hex(0x0A1230)), "D");
         }
 
         // Hole cards.
@@ -226,19 +229,20 @@ public sealed class PokerScene
             var lp = above ? cardsCenter - new Vector2(0, ch * 0.5f + S(14)) : cardsCenter + new Vector2(0, ch * 0.5f + S(12));
             var fs = S(13);
             var ts = Gfx.TextSize(FontRole.Body, fs, label);
-            var lMin = lp - new Vector2(ts.X / 2 + S(8), ts.Y / 2 + S(3));
-            var lMax = lp + new Vector2(ts.X / 2 + S(8), ts.Y / 2 + S(3));
-            dl.AddRectFilled(lMin, lMax, Pal.U(isWinner ? Pal.Mix(Pal.Gold, Pal.Black, 0.3f) : Pal.Hex(0x0D1116), 0.92f), S(10));
-            dl.AddRect(lMin, lMax, Pal.U(isWinner ? Pal.Gold : Pal.Line), S(10));
-            dl.AddText(UiEnv.Font(FontRole.Body, fs), fs, lp - ts / 2, Pal.U(isWinner ? Pal.White : Pal.Text), label);
+            var lMin = lp - new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
+            var lMax = lp + new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
+            var lc = isWinner ? Pal.Gold : Pal.Accent;
+            Gfx.ChamferPanel(dl, lMin, lMax, (lMax.Y - lMin.Y) * 0.32f, isWinner ? Pal.Mix(Pal.Gold, Pal.Black, 0.35f) : Pal.Hex(0x0E1530, 0.94f),
+                isWinner ? Pal.Mix(Pal.Gold, Pal.Black, 0.55f) : Pal.Hex(0x080C1E, 0.94f), Pal.A(lc, isWinner ? 1f : 0.55f), 1f, all: true);
+            dl.AddText(UiEnv.Font(FontRole.Body, fs), fs, lp - ts / 2, Pal.U(isWinner ? Pal.White : Pal.AccentLight), label);
         }
 
         // Plate.
         var active = v.BettingRound && v.ActiveSeat == seat;
         var left = s.SecondsLeft(clockNow);
         var frac = active && !double.IsNaN(left) ? (float)Math.Clamp(left / rules.TurnSeconds, 0, 1) : 0;
-        var (badge, badgeCol) = Badge(v, sv, seat);
         var entry = s.Roster.BySeat(seat);
+        var (badge, badgeCol) = Badge(v, sv, seat, entry?.Flags ?? RosterFlags.None);
         SeatArt.Plate(dl, pos, new SeatInfo(s.NameAt(seat), _a.Count($"stack{seat}", sv.Stack, now), isMe, active, frac, badge, badgeCol,
             folded || sv.Status is PokerSeatStatus.SittingOut or PokerSeatStatus.Waiting && v.Phase != PokerPhase.Waiting,
             entry?.Flags.HasFlag(RosterFlags.Host) == true, sv.Status == PokerSeatStatus.SittingOut), now);
@@ -253,8 +257,11 @@ public sealed class PokerScene
         return Math.Min(dx, dy);
     }
 
-    private static (string?, Vector4) Badge(PokerView v, PokerSeatView sv, int seat)
+    private static (string?, Vector4) Badge(PokerView v, PokerSeatView sv, int seat, RosterFlags flags)
     {
+        var between = v.Phase is PokerPhase.Waiting or PokerPhase.Starting || !sv.InHand;
+        if (flags.HasFlag(RosterFlags.RebuyPending) && between && v.Phase != PokerPhase.Showdown) return ("REBUY ASKED", Pal.Magenta);
+        if (sv.Stack == 0 && between && v.Phase != PokerPhase.Showdown) return ("OUT OF CHIPS", Pal.Red);
         if (sv.Status == PokerSeatStatus.SittingOut) return ("SITTING OUT", Pal.Muted);
         if (sv.Status == PokerSeatStatus.Waiting && v.Phase is not PokerPhase.Waiting and not PokerPhase.Starting) return ("NEXT HAND", Pal.Muted);
         if (v.Phase == PokerPhase.Showdown && sv.Won > 0) return ($"WINS {Gfx.Chips(sv.Won)}", Pal.Gold);

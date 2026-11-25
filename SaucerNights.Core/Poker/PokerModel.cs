@@ -13,8 +13,11 @@ public sealed class PokerRules
     public long StartingStack = 2000;
     public byte MaxSeats = 8;
     public byte TurnSeconds = 30;
-    public bool ProvablyFair;
-    public bool HostPlays = true;
+    /// <summary>On by default: players check every deck afterwards, so the host can't stack it.</summary>
+    public bool ProvablyFair = true;
+
+    /// <summary>Off by default: a host who plays also sees every card, so only friends should allow it.</summary>
+    public bool HostPlays;
     public bool AutoStart = true;
 
     public PokerRules Normalized()

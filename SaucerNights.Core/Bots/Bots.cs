@@ -1,6 +1,7 @@
 using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Cards;
 using SaucerNights.Core.Poker;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Sessions;
 
 namespace SaucerNights.Core.Bots;
@@ -266,5 +267,89 @@ public sealed class PokerBot : IBot
             else if (mine == best) score += 1.0 / (ties + 1);
         }
         return score / iterations;
+    }
+}
+
+/// <summary>Covers one to five spots a spin: mostly outside bets, now and then a number or a small group.</summary>
+public sealed class RouletteBot : IBot
+{
+    private static readonly RouletteBetKind[][] Groups =
+    [
+        [RouletteBetKind.Red, RouletteBetKind.Black, RouletteBetKind.Odd, RouletteBetKind.Even, RouletteBetKind.Low, RouletteBetKind.High],
+        [RouletteBetKind.Dozen, RouletteBetKind.Column],
+        [RouletteBetKind.Straight],
+        [RouletteBetKind.Split, RouletteBetKind.Street, RouletteBetKind.Corner, RouletteBetKind.SixLine, RouletteBetKind.Trio, RouletteBetKind.FirstFour],
+    ];
+
+    private static readonly double[] GroupOdds = [0.4, 0.2, 0.2, 0.2];
+
+    private readonly Random _rng;
+    private readonly Thinker _think;
+    private long _betRound = -1;
+    private DateTime _rebuyAt = DateTime.MinValue;
+
+    public RouletteBot(int seed, double minThink = 1.0, double maxThink = 5.0)
+    {
+        _rng = new Random(seed);
+        _think = new Thinker(_rng, minThink, maxThink);
+    }
+
+    public void Tick(ClientSession s, DateTime now)
+    {
+        if (!s.IsSeated || s.Roulette is not { } v || s.AwaitingHost) return;
+        var rules = s.Table.RouletteRules ?? new RouletteRules();
+        var me = v.Seat(s.MySeat);
+        if (me == null) return;
+
+        // Out of chips: ask the host for a rebuy while nothing of ours is riding.
+        var idle = v.Phase is RoulettePhase.Waiting or RoulettePhase.Settled || (v.Phase == RoulettePhase.Betting && me.Bets.Count == 0);
+        if (idle && me.Bankroll < rules.MinBet)
+        {
+            if (now >= _rebuyAt && !s.RebuyPending)
+            {
+                _rebuyAt = now + TimeSpan.FromSeconds(20);
+                s.RequestRebuy();
+            }
+            return;
+        }
+
+        if (v.Phase != RoulettePhase.Betting || _betRound == v.Round) return;
+        if (me.Bets.Count > 0)
+        {
+            _betRound = v.Round;
+            return;
+        }
+        if (!_think.Ready(v.Round, now)) return;
+        _betRound = v.Round;
+        // Sits a spin out now and then, but only when someone else is playing it: the wheel waits for a first bet.
+        if (_rng.NextDouble() < 0.15 && v.Seats.Any(x => x.Seat != me.Seat && x.Bets.Count > 0)) return;
+        var bets = Choose(me.Bankroll, rules);
+        if (bets.Count > 0) s.PlaceRouletteBets(bets);
+    }
+
+    private List<(byte Index, long Amount)> Choose(long bankroll, RouletteRules rules)
+    {
+        var budget = Math.Min(bankroll, rules.TableMax);
+        var count = 1 + _rng.Next(5);
+        var bets = new List<(byte Index, long Amount)>();
+        for (var k = 0; k < count && budget >= rules.MinBet; k++)
+        {
+            var index = PickSpot();
+            if (bets.Any(b => b.Index == index)) continue;
+            var units = new[] { 1, 1, 1, 2, 2, 3, 5 }[_rng.Next(7)];
+            var amount = Math.Min(Math.Min(rules.MinBet * units, rules.MaxBet), budget);
+            bets.Add((index, amount));
+            budget -= amount;
+        }
+        return bets;
+    }
+
+    private byte PickSpot()
+    {
+        var roll = _rng.NextDouble();
+        var g = 0;
+        while (g < GroupOdds.Length - 1 && roll >= GroupOdds[g]) roll -= GroupOdds[g++];
+        var options = RouletteBets.All.Where(b => Groups[g].Contains(b.Kind)).ToList();
+        return options[_rng.Next(options.Count)].Index;
     }
 }

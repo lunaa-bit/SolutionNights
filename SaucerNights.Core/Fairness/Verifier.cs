@@ -3,6 +3,7 @@ using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Cards;
 using SaucerNights.Core.Poker;
 using SaucerNights.Core.Protocol;
+using SaucerNights.Core.Roulette;
 
 namespace SaucerNights.Core.Fairness;
 
@@ -131,5 +132,34 @@ public static class Verifier
         return new(GameKind.Poker, v.Hand, FairStatus.Verified, $"Hand {v.Hand}: the board and every shown hand match the committed shuffle.", now);
 
         FairnessResult Fail(string why) => new(GameKind.Poker, v.Hand, FairStatus.Failed, why, now);
+    }
+
+    /// <summary>
+    /// Re-draws a settled spin's number from the revealed seeds. <paramref name="mySeed"/> only has to appear if this
+    /// player had chips on the layout; every other seat still showing bets must have its seed in the draw too.
+    /// </summary>
+    public static FairnessResult Roulette(RouletteView v, byte[]? commit, ushort tableId, int mySeat, byte[]? mySeed, DateTime now)
+    {
+        if (v.Reveal is not { } reveal) return new(GameKind.Roulette, v.Round, FairStatus.Unverifiable, "No seed reveal.", now);
+        if (commit == null)
+            return new(GameKind.Roulette, v.Round, FairStatus.Unverifiable, "The commitment was not seen before the spin (joined mid-round).", now);
+        if (!Fair.CheckCommit(reveal.ServerSeed, commit)) return Fail("The revealed server seed does not match the commitment.");
+        if (!v.HasResult) return Fail("The spin has no result.");
+
+        if (reveal.ClientSeeds.Select(s => s.Seat).Distinct().Count() != reveal.ClientSeeds.Count) return Fail("A seat's seed was used twice.");
+        if (mySeed != null && v.Seat(mySeat) is { Bets.Count: > 0 }
+            && !reveal.ClientSeeds.Any(s => s.Seat == mySeat && s.Seed.AsSpan().SequenceEqual(mySeed)))
+            return Fail("Your seed was not used.");
+        // A seat that left mid-spin may still have a seed in the draw; a seat with bets on show must.
+        foreach (var s in v.Seats.Where(s => s.Bets.Count > 0))
+            if (!reveal.ClientSeeds.Any(c => c.Seat == s.Seat))
+                return Fail($"Seat {s.Seat + 1}'s seed was left out of the draw.");
+
+        var number = Fair.RouletteNumber(reveal.ServerSeed, tableId, v.Round, reveal.ClientSeeds);
+        if (number != v.Result) return Fail($"The ball landed on {v.Result}, but the seeds give {number}.");
+
+        return new(GameKind.Roulette, v.Round, FairStatus.Verified, $"Spin {v.Round}: {number} matches the committed seed.", now);
+
+        FairnessResult Fail(string why) => new(GameKind.Roulette, v.Round, FairStatus.Failed, why, now);
     }
 }

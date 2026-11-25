@@ -22,6 +22,9 @@ public class SimulationTests(ITestOutputHelper output)
         public required LoopbackNetwork Net;
         public required List<(ClientSession Client, IBot Bot)> Players;
 
+        /// <summary>Like a real host, approve rebuy requests after a few seconds.</summary>
+        public bool HostApprovesRebuys = true;
+
         public void Run(TimeSpan duration, Action? check = null)
         {
             var end = Clock.Now + duration;
@@ -30,6 +33,9 @@ public class SimulationTests(ITestOutputHelper output)
                 Clock.Advance(TimeSpan.FromMilliseconds(100));
                 Net.Tick(Clock.Now);
                 foreach (var (c, b) in Players) b.Tick(c, Clock.Now);
+                if (HostApprovesRebuys)
+                    foreach (var r in Host.RebuyRequests.Where(r => Clock.Now - r.At > TimeSpan.FromSeconds(3)).ToList())
+                        Host.ApproveRebuy(r.Id);
                 check?.Invoke();
             }
         }
@@ -164,6 +170,9 @@ public class SimulationTests(ITestOutputHelper output)
         var before = ledger.First(e => e.Id == leaver.SelfId);
         Assert.False(before.Seated);
         var boughtIn = before.BuyIns;
+        var leftWith = before.Banked;
+        var cashedOut = before.CashedOut;
+        Assert.True(leftWith > 0);
 
         sim.Net.Remove(leaver);
         var again = new ClientSession(sim.Host.Info(sim.Clock.Now), leaver.SelfId, sim.Clock);
@@ -172,7 +181,11 @@ public class SimulationTests(ITestOutputHelper output)
         sim.Run(TimeSpan.FromSeconds(10));
         Assert.Equal(ClientStatus.Seated, again.Status);
         Assert.Equal(3, sim.Host.Players.Count);
-        Assert.Equal(boughtIn + game.StartingStack, sim.Host.Ledger().First(e => e.Id == leaver.SelfId).BuyIns);
+        // Coming back is not a fresh buy-in: the chips they left with follow them.
+        var after = sim.Host.Ledger().First(e => e.Id == leaver.SelfId);
+        Assert.Equal(boughtIn, after.BuyIns);
+        Assert.Equal(cashedOut - leftWith, after.CashedOut);
+        Assert.Equal(0, after.Banked);
     }
 
     [Fact]

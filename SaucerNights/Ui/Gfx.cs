@@ -31,25 +31,36 @@ public static class UiEnv
     public static float Dt => Math.Clamp(ImGui.GetIO().DeltaTime, 0.0001f, 0.1f);
 }
 
-/// <summary>Colour palette and helpers.</summary>
+/// <summary>
+/// Colour palette: Solution Nine after dark. Deep indigo glass, cyan and magenta neon, gold kept for money.
+/// </summary>
 public static class Pal
 {
-    public static readonly Vector4 Bg = Hex(0x0C0F14);
-    public static readonly Vector4 Panel = Hex(0x141920);
-    public static readonly Vector4 Panel2 = Hex(0x1B222B);
-    public static readonly Vector4 Panel3 = Hex(0x252E39);
-    public static readonly Vector4 Line = Hex(0x2C3642);
-    public static readonly Vector4 Text = Hex(0xEEF0F4);
-    public static readonly Vector4 Muted = Hex(0x98A2AF);
-    public static readonly Vector4 Faint = Hex(0x687280);
-    public static readonly Vector4 Gold = Hex(0xE8B04A);
-    public static readonly Vector4 GoldLight = Hex(0xF8DC96);
-    public static readonly Vector4 GoldDark = Hex(0x9C6F1E);
-    public static readonly Vector4 Green = Hex(0x3DD68C);
-    public static readonly Vector4 Red = Hex(0xF2555A);
-    public static readonly Vector4 Blue = Hex(0x5AB0F2);
-    public static readonly Vector4 Orange = Hex(0xF59E0B);
-    public static readonly Vector4 Purple = Hex(0xA78BFA);
+    public static readonly Vector4 Bg = Hex(0x070A16);
+    public static readonly Vector4 Panel = Hex(0x0C1124);
+    public static readonly Vector4 Panel2 = Hex(0x121A32);
+    public static readonly Vector4 Panel3 = Hex(0x1B2444);
+    public static readonly Vector4 Line = Hex(0x263258);
+    public static readonly Vector4 Text = Hex(0xEAF1FF);
+    public static readonly Vector4 Muted = Hex(0x93A1C8);
+    public static readonly Vector4 Faint = Hex(0x5E6A93);
+
+    /// <summary>The interface accent: Solution Nine cyan.</summary>
+    public static readonly Vector4 Accent = Hex(0x3DE0FF);
+    public static readonly Vector4 AccentLight = Hex(0xB4F3FF);
+    public static readonly Vector4 AccentDeep = Hex(0x0C7FB0);
+    public static readonly Vector4 Magenta = Hex(0xFF4FCB);
+    public static readonly Vector4 Violet = Hex(0x8C6CFF);
+
+    /// <summary>Money: chips, stacks, winnings.</summary>
+    public static readonly Vector4 Gold = Hex(0xFFC857);
+    public static readonly Vector4 GoldLight = Hex(0xFFE6A6);
+    public static readonly Vector4 GoldDark = Hex(0xB27A16);
+    public static readonly Vector4 Green = Hex(0x35E6A1);
+    public static readonly Vector4 Red = Hex(0xFF4D6D);
+    public static readonly Vector4 Blue = Hex(0x56A8FF);
+    public static readonly Vector4 Orange = Hex(0xFF9F45);
+    public static readonly Vector4 Purple = Hex(0xA98BFF);
     public static readonly Vector4 White = new(1, 1, 1, 1);
     public static readonly Vector4 Black = new(0, 0, 0, 1);
 
@@ -344,6 +355,216 @@ public static class Gfx
     /// <summary>Arc length (radians) a string occupies on a circle of the given radius.</summary>
     public static float ArcSpan(FontRole role, float size, float radius, string text, float letterSpacing = 1.15f) =>
         text.Sum(ch => TextSize(role, size, ch.ToString()).X * letterSpacing) / radius;
+
+    // ───────────── Solution Nine shapes ─────────────
+
+    /// <summary>
+    /// A rectangle with its top-left and bottom-right corners cut at 45 degrees (the angular Solution Nine panel). With
+    /// <paramref name="all"/> every corner is cut.
+    /// </summary>
+    public static int Chamfer(Span<Vector2> buf, Vector2 min, Vector2 max, float cut, bool all = false)
+    {
+        cut = Math.Max(0, Math.Min(cut, Math.Min((max.X - min.X) / 2, (max.Y - min.Y) / 2)));
+        var n = 0;
+        buf[n++] = new Vector2(min.X + cut, min.Y);
+        if (all)
+        {
+            buf[n++] = new Vector2(max.X - cut, min.Y);
+            buf[n++] = new Vector2(max.X, min.Y + cut);
+        }
+        else
+        {
+            buf[n++] = new Vector2(max.X, min.Y);
+        }
+        buf[n++] = new Vector2(max.X, max.Y - cut);
+        buf[n++] = new Vector2(max.X - cut, max.Y);
+        if (all)
+        {
+            buf[n++] = new Vector2(min.X + cut, max.Y);
+            buf[n++] = new Vector2(min.X, max.Y - cut);
+        }
+        else
+        {
+            buf[n++] = new Vector2(min.X, max.Y);
+        }
+        buf[n++] = new Vector2(min.X, min.Y + cut);
+        return n;
+    }
+
+    /// <summary>Chamfered panel with a vertical gradient and an optional border.</summary>
+    public static void ChamferPanel(ImDrawListPtr dl, Vector2 min, Vector2 max, float cut, Vector4 top, Vector4 bottom, Vector4? border = null,
+        float thickness = 1f, bool all = false)
+    {
+        Span<Vector2> pts = stackalloc Vector2[8];
+        var n = Chamfer(pts, min, max, cut, all);
+        FillVertical(dl, pts[..n], top, bottom);
+        if (border is { } b) Outline(dl, pts[..n], Pal.U(b), thickness);
+    }
+
+    /// <summary>Outline of a chamfered rectangle.</summary>
+    public static void ChamferOutline(ImDrawListPtr dl, Vector2 min, Vector2 max, float cut, uint col, float thickness, bool all = false)
+    {
+        Span<Vector2> pts = stackalloc Vector2[8];
+        var n = Chamfer(pts, min, max, cut, all);
+        Outline(dl, pts[..n], col, thickness);
+    }
+
+    /// <summary>Soft neon glow around a chamfered rectangle (stacked translucent outlines).</summary>
+    public static void ChamferGlow(ImDrawListPtr dl, Vector2 min, Vector2 max, float cut, Vector4 color, float spread, float strength = 1f, bool all = false)
+    {
+        const int layers = 5;
+        Span<Vector2> pts = stackalloc Vector2[8];
+        for (var i = layers; i >= 1; i--)
+        {
+            var g = spread * i / layers;
+            var n = Chamfer(pts, min - new Vector2(g), max + new Vector2(g), cut + g * 0.41f, all);
+            Outline(dl, pts[..n], Pal.U(color, strength * 0.2f * (1 - (i - 1) / (float)layers)), spread / layers * 1.7f);
+        }
+    }
+
+    /// <summary>A line drawn as a neon tube: a bright core with a soft halo.</summary>
+    public static void NeonLine(ImDrawListPtr dl, Vector2 a, Vector2 b, Vector4 color, float thickness, float glow = 1f)
+    {
+        if (glow > 0)
+        {
+            dl.AddLine(a, b, Pal.U(color, 0.08f * glow), thickness * 6);
+            dl.AddLine(a, b, Pal.U(color, 0.16f * glow), thickness * 3);
+        }
+        dl.AddLine(a, b, Pal.U(color), thickness);
+        dl.AddLine(a, b, Pal.U(Pal.Lighten(color, 0.6f), 0.8f * color.W), Math.Max(1f, thickness * 0.4f));
+    }
+
+    /// <summary>A closed or open polyline drawn as a neon tube.</summary>
+    public static void NeonOutline(ImDrawListPtr dl, ReadOnlySpan<Vector2> pts, Vector4 color, float thickness, float glow = 1f, bool closed = true)
+    {
+        if (glow > 0)
+        {
+            Outline(dl, pts, Pal.U(color, 0.07f * glow), thickness * 7, closed);
+            Outline(dl, pts, Pal.U(color, 0.14f * glow), thickness * 3.2f, closed);
+        }
+        Outline(dl, pts, Pal.U(color), thickness, closed);
+        Outline(dl, pts, Pal.U(Pal.Lighten(color, 0.65f), 0.75f * color.W), Math.Max(1f, thickness * 0.4f), closed);
+    }
+
+    /// <summary>A regular hexagon (pointy top) around <paramref name="c"/>.</summary>
+    public static int Hexagon(Span<Vector2> buf, Vector2 c, float r, float rotation = -MathF.PI / 2)
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            var a = rotation + i * MathF.Tau / 6;
+            buf[i] = c + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
+        }
+        return 6;
+    }
+
+    /// <summary>A faint hexagon lattice over a rectangle (clipped), for felts and backdrops.</summary>
+    public static void HexGrid(ImDrawListPtr dl, Vector2 min, Vector2 max, float r, uint col, float thickness = 1f)
+    {
+        if (r < 3) return;
+        dl.PushClipRect(min, max, true);
+        var w = MathF.Sqrt(3) * r;
+        var rowH = r * 1.5f;
+        var row = 0;
+        Span<Vector2> hex = stackalloc Vector2[6];
+        for (var y = min.Y - r; y < max.Y + r; y += rowH, row++)
+        {
+            var x0 = min.X - w + (row % 2 == 1 ? w / 2 : 0);
+            for (var x = x0; x < max.X + w; x += w)
+            {
+                // Three edges per cell draw the whole lattice once.
+                Hexagon(hex, new Vector2(x, y), r);
+                dl.AddLine(hex[3], hex[4], col, thickness);
+                dl.AddLine(hex[4], hex[5], col, thickness);
+                dl.AddLine(hex[5], hex[0], col, thickness);
+            }
+        }
+        dl.PopClipRect();
+    }
+
+    /// <summary>
+    /// A night skyline standing on <paramref name="baseY"/>: towers of varied height with lit windows and neon roof
+    /// lines. Deterministic for a given seed, so it never flickers.
+    /// </summary>
+    public static void Skyline(ImDrawListPtr dl, float x0, float x1, float baseY, float height, int seed, float alpha = 1f, double time = 0)
+    {
+        if (x1 <= x0 || height <= 4) return;
+        var rng = new Random(seed);
+        var x = x0 - rng.NextSingle() * height * 0.3f;
+        var body = Pal.U(Pal.Hex(0x0A0F22), alpha);
+        var edge = Pal.U(Pal.Hex(0x1A2448), alpha);
+        Vector4[] lights = [Pal.Accent, Pal.Magenta, Pal.Gold, Pal.Violet];
+        while (x < x1)
+        {
+            var w = height * (0.12f + rng.NextSingle() * 0.22f);
+            var h = height * (0.25f + MathF.Pow(rng.NextSingle(), 1.6f) * 0.75f);
+            var min = new Vector2(x, baseY - h);
+            var max = new Vector2(x + w, baseY);
+            dl.AddRectFilled(min, max, body);
+            dl.AddLine(min, new Vector2(min.X, max.Y), edge, 1f);
+            var light = lights[rng.Next(lights.Length)];
+            var blink = rng.NextSingle() * 6;
+            if (rng.NextSingle() < 0.25f)
+            {
+                // A spire with a beacon.
+                var sx = min.X + w * 0.5f;
+                dl.AddTriangleFilled(new Vector2(min.X + w * 0.3f, min.Y), new Vector2(sx, min.Y - h * 0.18f), new Vector2(min.X + w * 0.7f, min.Y), body);
+                var beacon = 0.45f + 0.55f * MathF.Max(0, MathF.Sin((float)time * 1.7f + blink));
+                dl.AddCircleFilled(new Vector2(sx, min.Y - h * 0.18f), Math.Max(1.2f, w * 0.05f), Pal.U(Pal.Red, alpha * beacon), 8);
+            }
+            else
+            {
+                dl.AddLine(min, new Vector2(max.X, min.Y), Pal.U(light, 0.75f * alpha), Math.Max(1f, height * 0.012f));
+            }
+            var cell = Math.Max(3f, height * 0.045f);
+            for (var wy = min.Y + cell; wy < max.Y - cell * 0.5f; wy += cell * 1.6f)
+            {
+                for (var wx = min.X + cell * 0.6f; wx < max.X - cell * 0.6f; wx += cell * 1.3f)
+                {
+                    if (rng.NextSingle() > 0.3f) continue;
+                    var lc = rng.NextSingle() < 0.7f ? light : Pal.Hex(0xFFF2D0);
+                    dl.AddRectFilled(new Vector2(wx, wy), new Vector2(wx + cell * 0.6f, wy + cell * 0.45f), Pal.U(lc, (0.22f + rng.NextSingle() * 0.4f) * alpha));
+                }
+            }
+            x += w + height * (rng.NextSingle() < 0.3f ? 0.04f : 0.005f);
+        }
+    }
+
+    /// <summary>Text with extra space between letters (captions, felt printing). Returns the drawn size.</summary>
+    public static Vector2 TextSpaced(ImDrawListPtr dl, FontRole role, float size, Vector2 pos, uint col, string text, float spacing)
+    {
+        var font = UiEnv.Font(role, size);
+        var x = pos.X;
+        foreach (var ch in text)
+        {
+            var s = ch.ToString();
+            dl.AddText(font, size, new Vector2(x, pos.Y), col, s);
+            x += TextSize(font, size, s).X + spacing;
+        }
+        return new Vector2(x - pos.X - (text.Length > 0 ? spacing : 0), TextSize(font, size, text).Y);
+    }
+
+    public static Vector2 TextSpacedSize(FontRole role, float size, string text, float spacing)
+    {
+        var font = UiEnv.Font(role, size);
+        var w = text.Sum(ch => TextSize(font, size, ch.ToString()).X) + spacing * Math.Max(0, text.Length - 1);
+        return new Vector2(w, TextSize(font, size, text).Y);
+    }
+
+    /// <summary>Neon text: soft offset copies under a crisp, slightly lightened top layer.</summary>
+    public static Vector2 TextGlow(ImDrawListPtr dl, FontRole role, float size, Vector2 center, Vector4 col, string text, float glow = 1f, float alpha = 1f)
+    {
+        var font = UiEnv.Font(role, size);
+        var sz = TextSize(font, size, text);
+        var p = center - sz / 2;
+        var r = Math.Max(1.5f, size * 0.06f);
+        for (var i = 0; i < 8; i++)
+        {
+            var a = i * MathF.PI / 4;
+            dl.AddText(font, size, p + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r, Pal.U(col, 0.13f * glow * alpha), text);
+        }
+        dl.AddText(font, size, p, Pal.U(Pal.Lighten(col, 0.45f), alpha), text);
+        return sz;
+    }
 
     public static string Chips(long v) => v switch
     {

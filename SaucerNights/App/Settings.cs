@@ -1,5 +1,6 @@
 using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Poker;
+using SaucerNights.Core.Roulette;
 
 namespace SaucerNights.App;
 
@@ -40,27 +41,60 @@ public static class ChatChannels
     };
 }
 
+/// <summary>Table felts. Saved as numbers, so existing values keep their slot.</summary>
 public enum FeltStyle
 {
-    Emerald,
-    Sapphire,
-    Crimson,
-    Amethyst,
-    Onyx,
+    Emerald = 0,
+    Neon = 1,
+    Crimson = 2,
+    Ultraviolet = 3,
+    Gilded = 4,
 }
 
 public enum CardBackStyle
 {
-    Crimson,
-    Midnight,
-    Emerald,
-    Gilded,
+    Crimson = 0,
+    Midnight = 1,
+    Emerald = 2,
+    Gilded = 3,
+    Neon = 4,
+    Ultraviolet = 5,
+}
+
+public static class Looks
+{
+    public static readonly FeltStyle[] Felts = [FeltStyle.Neon, FeltStyle.Ultraviolet, FeltStyle.Gilded, FeltStyle.Emerald, FeltStyle.Crimson];
+    public static readonly CardBackStyle[] Backs = [CardBackStyle.Neon, CardBackStyle.Ultraviolet, CardBackStyle.Gilded, CardBackStyle.Midnight, CardBackStyle.Crimson, CardBackStyle.Emerald];
+
+    public static string Name(FeltStyle f) => f switch
+    {
+        FeltStyle.Neon => "Neon night",
+        FeltStyle.Ultraviolet => "Ultraviolet",
+        FeltStyle.Gilded => "Gilded",
+        FeltStyle.Emerald => "Classic green",
+        _ => "Crimson",
+    };
+
+    public static string Name(CardBackStyle b) => b switch
+    {
+        CardBackStyle.Neon => "Neon lattice",
+        CardBackStyle.Ultraviolet => "Ultraviolet",
+        CardBackStyle.Gilded => "Gilded",
+        CardBackStyle.Midnight => "Midnight",
+        CardBackStyle.Emerald => "Emerald",
+        _ => "Classic red",
+    };
 }
 
 /// <summary>Plugin settings, saved as JSON next to the plugin's config.</summary>
 public sealed class Settings
 {
-    public int Version { get; set; } = 1;
+    public const int CurrentVersion = 2;
+
+    public int Version { get; set; } = CurrentVersion;
+
+    /// <summary>False until the player has been through the welcome screen and picked a linkshell.</summary>
+    public bool IntroDone { get; set; }
 
     // Channel
     public ChatChannel Channel { get; set; } = ChatChannel.Cwls1;
@@ -68,8 +102,14 @@ public sealed class Settings
     public int SendIntervalMs { get; set; } = 1200;
 
     // Look & feel
-    public FeltStyle Felt { get; set; } = FeltStyle.Emerald;
-    public CardBackStyle CardBack { get; set; } = CardBackStyle.Crimson;
+    public const float MinScale = 0.75f;
+    public const float MaxScale = 1.6f;
+
+    /// <summary>Size of everything in the plugin's windows, on top of Dalamud's global scale.</summary>
+    public float UiScale { get; set; } = 1f;
+
+    public FeltStyle Felt { get; set; } = FeltStyle.Neon;
+    public CardBackStyle CardBack { get; set; } = CardBackStyle.Neon;
     public bool FourColorDeck { get; set; }
     public float AnimationSpeed { get; set; } = 1f;
     public bool ShowSidePanel { get; set; } = true;
@@ -91,7 +131,32 @@ public sealed class Settings
 
     // Hosting
     public string TableTitle { get; set; } = string.Empty;
-    public bool AutoApproveRebuys { get; set; } = true;
     public BlackjackRules Blackjack { get; set; } = new();
     public PokerRules Poker { get; set; } = new();
+    public RouletteRules Roulette { get; set; } = new();
+
+    /// <summary>Brings settings saved by an older version up to date. Returns true if anything changed.</summary>
+    public bool Upgrade()
+    {
+        var changed = false;
+        if (Version < 2)
+        {
+            // 1.1: the Solution Nine look replaces the old defaults once, and hold'em starts from the safer
+            // defaults (checked shuffles, host deals without playing).
+            Felt = FeltStyle.Neon;
+            CardBack = CardBackStyle.Neon;
+            Poker.ProvablyFair = true;
+            Poker.HostPlays = false;
+            changed = true;
+        }
+        if (!float.IsFinite(UiScale) || UiScale < MinScale || UiScale > MaxScale)
+        {
+            UiScale = Math.Clamp(float.IsFinite(UiScale) ? UiScale : 1f, MinScale, MaxScale);
+            changed = true;
+        }
+        if (!Enum.IsDefined(Felt)) (Felt, changed) = (FeltStyle.Neon, true);
+        if (!Enum.IsDefined(CardBack)) (CardBack, changed) = (CardBackStyle.Neon, true);
+        if (Version != CurrentVersion) (Version, changed) = (CurrentVersion, true);
+        return changed;
+    }
 }

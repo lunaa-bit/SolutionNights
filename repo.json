@@ -1,22 +1,23 @@
 [
   {
     "Author": "Birch",
-    "Name": "Saucer Nights",
-    "Punchline": "Blackjack and hold'em over your linkshell.",
-    "Description": "Play blackjack and no-limit Texas Hold'em with friends over a cross-world linkshell. One player hosts and deals; everyone else joins from the lobby. Animated tables, encrypted hole cards, provably fair shuffles, practice tables against bots and a chip ledger for the host. Chips are play money: the plugin never trades gil.",
+    "Name": "Solution Nights",
+    "Punchline": "Blackjack, hold'em and roulette over your linkshell.",
+    "Description": "Play blackjack, no-limit Texas Hold'em and European roulette with friends over a cross-world linkshell, at a neon table in the spirit of Solution Nine. One player hosts and deals; everyone else joins from the lobby. Animated tables, encrypted hole cards, provably fair shuffles, host-approved buy-backs, practice tables against bots, an adjustable interface size and a chip ledger for the host. Chips are play money: the plugin never trades gil. (Formerly Saucer Nights.)",
     "Tags": [
       "cards",
       "poker",
       "blackjack",
+      "roulette",
       "casino",
       "linkshell",
       "social",
       "games"
     ],
     "InternalName": "SaucerNights",
-    "AssemblyVersion": "1.0.1.0",
-    "TestingAssemblyVersion": "1.0.1.0",
-    "RepoUrl": "https://github.com/lunaa-bit/Saucer-Nights",
+    "AssemblyVersion": "1.1.0.0",
+    "TestingAssemblyVersion": "1.1.0.0",
+    "RepoUrl": "https://github.com/lunaa-bit/SolutionNights",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
     "TestingDalamudApiLevel": 15,
@@ -24,9 +25,9 @@
     "IsTestingExclusive": "False",
     "DownloadCount": 0,
     "LastUpdate": 1795546932,
-    "DownloadLinkInstall": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
-    "DownloadLinkUpdate": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
-    "DownloadLinkTesting": "https://github.com/lunaa-bit/Saucer-Nights/releases/download/1.0.1.0/SaucerNights.zip",
-    "IconUrl": "https://raw.githubusercontent.com/lunaa-bit/Saucer-Nights/main/images/icon.png"
+    "DownloadLinkInstall": "https://github.com/lunaa-bit/SolutionNights/releases/download/1.1.0.0/SaucerNights.zip",
+    "DownloadLinkUpdate": "https://github.com/lunaa-bit/SolutionNights/releases/download/1.1.0.0/SaucerNights.zip",
+    "DownloadLinkTesting": "https://github.com/lunaa-bit/SolutionNights/releases/download/1.1.0.0/SaucerNights.zip",
+    "IconUrl": "https://raw.githubusercontent.com/lunaa-bit/SolutionNights/main/images/icon.png"
   }
 ]

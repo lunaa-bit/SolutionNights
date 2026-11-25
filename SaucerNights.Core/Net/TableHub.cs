@@ -2,6 +2,7 @@ using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Bots;
 using SaucerNights.Core.Poker;
 using SaucerNights.Core.Protocol;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Sessions;
 using SaucerNights.Core.Wire;
 
@@ -28,23 +29,31 @@ public sealed class PracticeTable : IDisposable
     private readonly LoopbackNetwork _net;
     private readonly List<(ClientSession Client, IBot Bot)> _bots = [];
 
-    public PracticeTable(GameKind kind, int bots, string playerId, IClock clock, BlackjackRules? bj = null, PokerRules? poker = null)
+    public PracticeTable(GameKind kind, int bots, string playerId, IClock clock, BlackjackRules? bj = null, PokerRules? poker = null, RouletteRules? roulette = null)
     {
-        ITableGame game = kind == GameKind.Blackjack
-            ? new BlackjackEngine(bj ?? new BlackjackRules { ProvablyFair = true })
-            : new PokerEngine((poker ?? new PokerRules()).WithHostPlays(false));
+        ITableGame game = kind switch
+        {
+            GameKind.Blackjack => new BlackjackEngine(bj ?? new BlackjackRules { ProvablyFair = true }),
+            GameKind.Roulette => new RouletteEngine((roulette ?? new RouletteRules()).WithAutoSpin()),
+            _ => new PokerEngine((poker ?? new PokerRules()).WithHostPlays(false)),
+        };
         Host = new HostSession(game, new HostOptions
         {
             HostId = DealerId,
             HostName = "Practice dealer",
-            Title = kind == GameKind.Blackjack ? "Practice blackjack" : "Practice hold'em",
+            Title = kind switch
+            {
+                GameKind.Blackjack => "Practice blackjack",
+                GameKind.Roulette => "Practice roulette",
+                _ => "Practice hold'em",
+            },
             AutoApproveRebuys = true,
         }, clock);
         _net = new LoopbackNetwork(Host, TimeSpan.FromMilliseconds(120));
 
         Me = new ClientSession(Host.Info(clock.Now), playerId, clock);
         _net.Add(Me);
-        Me.Join(kind == GameKind.Blackjack ? game.MaxSeats / 2 : 0);
+        Me.Join(kind == GameKind.Poker ? 0 : game.MaxSeats / 2);
 
         var seed = Environment.TickCount;
         var maxBots = Math.Min(bots, game.MaxSeats - 1);
@@ -53,7 +62,12 @@ public sealed class PracticeTable : IDisposable
             var c = new ClientSession(Host.Info(clock.Now), $"{BotNames[i % BotNames.Length]}@Bot", clock);
             _net.Add(c);
             c.Join();
-            IBot bot = kind == GameKind.Blackjack ? new BlackjackBot(seed + i) : new PokerBot(seed + i);
+            IBot bot = kind switch
+            {
+                GameKind.Blackjack => new BlackjackBot(seed + i),
+                GameKind.Roulette => new RouletteBot(seed + i),
+                _ => new PokerBot(seed + i),
+            };
             _bots.Add((c, bot));
         }
     }
@@ -82,6 +96,14 @@ public static class RulesExtensions
     {
         var copy = r.Normalized();
         copy.HostPlays = hostPlays;
+        return copy;
+    }
+
+    /// <summary>Nobody presses "spin" at a practice table, so betting always reopens by itself.</summary>
+    public static RouletteRules WithAutoSpin(this RouletteRules r)
+    {
+        var copy = r.Normalized();
+        copy.AutoSpin = true;
         return copy;
     }
 }
@@ -213,11 +235,11 @@ public sealed class TableHub : IDisposable
         Client.RequestResync(ResyncNeed.Roster | ResyncNeed.State);
     }
 
-    public void StartPractice(GameKind kind, int bots, BlackjackRules? bj = null, PokerRules? poker = null)
+    public void StartPractice(GameKind kind, int bots, BlackjackRules? bj = null, PokerRules? poker = null, RouletteRules? roulette = null)
     {
         LeaveTable();
         var id = string.IsNullOrEmpty(_link.SelfId) ? "You@Practice" : _link.SelfId;
-        Practice = new PracticeTable(kind, bots, id, _clock, bj, poker);
+        Practice = new PracticeTable(kind, bots, id, _clock, bj, poker, roulette);
         Practice.Me.Notice += Say;
     }
 

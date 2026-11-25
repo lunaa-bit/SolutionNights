@@ -5,6 +5,7 @@ using SaucerNights.Core.Crypto;
 using SaucerNights.Core.Fairness;
 using SaucerNights.Core.Poker;
 using SaucerNights.Core.Protocol;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Wire;
 
 namespace SaucerNights.Core.Sessions;
@@ -28,11 +29,16 @@ public sealed class TableInfo
 
     public PokerRules? PokerRules => Game == GameKind.Poker && Rules.Length > 0 ? Poker.PokerRules.FromBytes(Rules) : null;
 
+    public RouletteRules? RouletteRules => Game == GameKind.Roulette && Rules.Length > 0 ? Roulette.RouletteRules.FromBytes(Rules) : null;
+
     public bool Compatible => Version == ProtocolInfo.Version;
 
-    public string StakesText => Game == GameKind.Blackjack
-        ? BlackjackRules is { } b ? $"{b.MinBet:N0} - {b.MaxBet:N0}" : "?"
-        : PokerRules is { } p ? p.StakesText : "?";
+    public string StakesText => Game switch
+    {
+        GameKind.Blackjack => BlackjackRules is { } b ? $"{b.MinBet:N0} - {b.MaxBet:N0}" : "?",
+        GameKind.Roulette => RouletteRules is { } r ? r.StakesText : "?",
+        _ => PokerRules is { } p ? p.StakesText : "?",
+    };
 
     public static TableInfo From(AnnounceMsg a, ushort tableId, string hostId, DateTime now) => new()
     {
@@ -126,6 +132,8 @@ public sealed class ClientSession : IDisposable
 
     public PokerView? Poker => State?.Poker;
 
+    public RouletteView? Roulette => State?.Roulette;
+
     /// <summary>This player's hole cards for <see cref="HoleHand"/>.</summary>
     public Card[] Hole { get; private set; } = [];
 
@@ -146,7 +154,7 @@ public sealed class ClientSession : IDisposable
     /// <summary>Seconds left on the current deadline, counting down locally between snapshots.</summary>
     public double SecondsLeft(DateTime now)
     {
-        var sec = Blackjack?.DeadlineSec ?? Poker?.DeadlineSec ?? 255;
+        var sec = Blackjack?.DeadlineSec ?? Poker?.DeadlineSec ?? Roulette?.DeadlineSec ?? 255;
         if (sec == 255) return double.NaN;
         return Math.Max(0, sec - (now - StateAt).TotalSeconds);
     }
@@ -181,9 +189,28 @@ public sealed class ClientSession : IDisposable
         Enqueue(msg);
     }
 
+    /// <summary>
+    /// Roulette: every bet the player wants down this spin (index into <see cref="RouletteBets.All"/>, chips). It replaces
+    /// what they had before; an empty list takes everything back, and the same spot listed twice counts once with the
+    /// chips added up. Returns null once sent, or why it wasn't (the same check the host makes).
+    /// </summary>
+    public string? PlaceRouletteBets(IReadOnlyList<(byte Index, long Amount)> bets)
+    {
+        if (!IsSeated) return "You aren't seated.";
+        if (Roulette is not { Phase: RoulettePhase.Betting } v) return "Betting is closed.";
+        var list = bets.Where(b => b.Amount > 0).GroupBy(b => b.Index).Select(g => (Index: g.Key, Amount: g.Sum(b => b.Amount))).ToList();
+        if (v.Seat(MySeat) is { } me && Table.RouletteRules?.BetProblem(list, me.Bankroll + me.TotalBet) is { } problem) return problem;
+        // One seed per spin, however often the bets change.
+        if (!_mySeeds.TryGetValue(v.Round, out var seed)) _mySeeds[v.Round] = seed = Fair.NewClientSeed();
+        var msg = new RouletteBetMsg { Round = v.Round, Seed = seed, Bets = list };
+        _pendingBet = new Pending { Msg = msg, SentAt = _clock.Now };
+        Enqueue(msg);
+        return null;
+    }
+
     public void Act(byte kind, long amount = 0, byte hand = 0)
     {
-        if (!IsSeated || State == null) return;
+        if (!IsSeated || State == null || (Blackjack == null && Poker == null)) return;
         var (round, turn) = Blackjack is { } b ? (b.Round, b.TurnId) : (Poker!.Hand, Poker.TurnId);
         var msg = new ActionMsg { Round = round, TurnId = turn, Kind = kind, Amount = amount, Hand = hand };
         _pendingAction = new Pending { Msg = msg, SentAt = _clock.Now };
@@ -208,8 +235,29 @@ public sealed class ClientSession : IDisposable
 
     public void RequestRebuy()
     {
-        if (IsSeated) Enqueue(new RebuyMsg());
+        if (!IsSeated || RebuyPending) return;
+        var stack = Blackjack?.Seat(MySeat)?.Bankroll ?? Poker?.Seat(MySeat)?.Stack ?? RouletteChips();
+        var starting = Table.BlackjackRules?.StartingStack ?? Table.PokerRules?.StartingStack ?? Table.RouletteRules?.StartingStack;
+        if (stack != null && starting != null && stack >= starting) return;
+        _rebuyAskedAt = _clock.Now;
+        _rebuyAskedRoster = Roster.Version;
+        Enqueue(new RebuyMsg());
     }
+
+    /// <summary>Roulette: the player's chips, counting bets that are on the layout and not settled yet.</summary>
+    private long? RouletteChips() =>
+        Roulette is { } v && v.Seat(MySeat) is { } me ? me.Bankroll + (v.Phase is RoulettePhase.Betting or RoulettePhase.Spinning ? me.TotalBet : 0) : null;
+
+    /// <summary>
+    /// True from asking for a rebuy until the host approves or turns it down. The host's roster says so; until the next
+    /// roster arrives, the local request counts.
+    /// </summary>
+    public bool RebuyPending =>
+        IsSeated && (Roster.BySeat(MySeat)?.Flags.HasFlag(RosterFlags.RebuyPending) == true
+                     || (Roster.Version == _rebuyAskedRoster && _clock.Now - _rebuyAskedAt < TimeSpan.FromSeconds(12)));
+
+    private DateTime _rebuyAskedAt = DateTime.MinValue;
+    private byte _rebuyAskedRoster;
 
     public void RequestResync(ResyncNeed need)
     {
@@ -222,7 +270,7 @@ public sealed class ClientSession : IDisposable
     /// <summary>Queues a message, replacing an older unsent one of the same kind.</summary>
     private void Enqueue(IMessage msg)
     {
-        if (msg.Type is MessageType.Action or MessageType.Bet or MessageType.Ready or MessageType.Resync or MessageType.SitOut or MessageType.Join)
+        if (msg.Type is MessageType.Action or MessageType.Bet or MessageType.RouletteBet or MessageType.Ready or MessageType.Resync or MessageType.SitOut or MessageType.Join)
             _out.RemoveAll(m => m.Type == msg.Type);
         _out.Add(msg);
     }
@@ -265,7 +313,7 @@ public sealed class ClientSession : IDisposable
                 {
                     RejectReason.Full => "The table is full.",
                     RejectReason.Kicked => "The host has removed you from this table.",
-                    RejectReason.BadVersion => "Your Saucer Nights version doesn't match the host's.",
+                    RejectReason.BadVersion => "Your Solution Nights version doesn't match the host's.",
                     _ => "The host could not seat you.",
                 });
                 break;
@@ -352,14 +400,30 @@ public sealed class ClientSession : IDisposable
                 }
             }
         }
+        else if (st.Roulette is { } rl)
+        {
+            if (rl.Commit != null) _commits[rl.Round] = rl.Commit;
+            var mine = IsSeated ? rl.Seat(MySeat) : null;
+            if (_pendingBet?.Msg is RouletteBetMsg pb
+                && (rl.Phase != RoulettePhase.Betting || rl.Round != pb.Round || SameBets(mine?.Bets ?? [], pb.Bets)))
+                _pendingBet = null;
+            if (rl.Phase == RoulettePhase.Settled && rl.Reveal != null && rl.Round != _verifiedRound)
+            {
+                _verifiedRound = rl.Round;
+                Record(Verifier.Roulette(rl, _commits.GetValueOrDefault(rl.Round), Table.TableId, MySeat, _mySeeds.GetValueOrDefault(rl.Round), now));
+            }
+        }
 
         // Forget bookkeeping for old rounds.
-        var round = st.Blackjack?.Round ?? st.Poker!.Hand;
+        var round = st.Blackjack?.Round ?? st.Poker?.Hand ?? st.Roulette?.Round ?? 0;
         foreach (var k in _commits.Keys.Where(k => k < round - 3).ToList()) _commits.Remove(k);
         foreach (var k in _mySeeds.Keys.Where(k => k < round - 3).ToList()) _mySeeds.Remove(k);
 
         Updated?.Invoke(new StateUpdate(prev, st, st.Events, now));
     }
+
+    private static bool SameBets(List<(byte Index, long Amount)> a, List<(byte Index, long Amount)> b) =>
+        a.Count == b.Count && a.OrderBy(x => x.Index).SequenceEqual(b.OrderBy(x => x.Index));
 
     private void Record(FairnessResult r)
     {

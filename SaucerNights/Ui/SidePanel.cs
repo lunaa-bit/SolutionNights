@@ -10,6 +10,35 @@ using SaucerNights.Core.Sessions;
 
 namespace SaucerNights.Ui;
 
+/// <summary>What the host's "start" button does right now, shared by the side panel and the dealer's dock.</summary>
+public static class HostControls
+{
+    public static (string Label, bool CanStart, string Hint) Start(HostSession host)
+    {
+        switch (host.Game)
+        {
+            case BlackjackEngine bj:
+                return (bj.Phase is BjPhase.Betting ? "Deal now" : "Open betting", bj.Phase is BjPhase.Waiting or BjPhase.Settled or BjPhase.Betting,
+                    bj.Rules.AutoDeal ? "Auto-deal is on: betting opens by itself after each round." : "Auto-deal is off: open betting yourself each round.");
+            case PokerEngine pk:
+                return (pk.Phase == PokerPhase.Showdown ? "Next hand" : "Start hand",
+                    pk.Phase is PokerPhase.Waiting or PokerPhase.Starting or PokerPhase.Showdown && host.Players.Count >= 2,
+                    pk.Rules.AutoStart ? "Hands start automatically while two or more players are seated." : "Start each hand yourself.");
+            case Core.Roulette.RouletteEngine rl:
+                return (rl.Phase switch
+                    {
+                        Core.Roulette.RoulettePhase.Betting => "Spin now",
+                        Core.Roulette.RoulettePhase.Spinning => "Spinning...",
+                        _ => "Open betting",
+                    },
+                    rl.Phase is Core.Roulette.RoulettePhase.Betting or Core.Roulette.RoulettePhase.Waiting or Core.Roulette.RoulettePhase.Settled,
+                    rl.Rules.AutoSpin ? "Auto-spin is on: betting reopens by itself after each spin." : "Auto-spin is off: open betting yourself each spin.");
+            default:
+                return ("Start", true, "");
+        }
+    }
+}
+
 /// <summary>Right-hand panel: table log, linkshell chat, players and ledger, fairness checks and host tools.</summary>
 public sealed class SidePanel
 {
@@ -27,15 +56,15 @@ public sealed class SidePanel
     public void Draw(Vector2 min, Vector2 max, ClientSession? s, GameApp app, TableLog log)
     {
         var dl = ImGui.GetWindowDrawList();
-        Gfx.RoundedGradient(dl, min, max, 0, Pal.Hex(0x12171E), Pal.Hex(0x0E1217));
-        dl.AddLine(min, new Vector2(min.X, max.Y), Pal.U(Pal.Line), S(1));
+        W.Glass(dl, min, max, S(16));
 
         var hosting = app.Hub.Host != null;
         string[] tabs = hosting ? ["Log", "Chat", "Players", "Fair", "Host"] : ["Log", "Chat", "Players", "Fair"];
         _tab = Math.Min(_tab, tabs.Length - 1);
         var pad = S(12);
         ImGui.SetCursorScreenPos(min + new Vector2(pad, pad));
-        W.Segmented("##sidetabs", tabs, ref _tab, max.X - min.X - pad * 2);
+        var requests = app.Hub.Host?.RebuyRequests.Count ?? 0;
+        W.Segmented("##sidetabs", tabs, ref _tab, max.X - min.X - pad * 2, [0, 0, requests]);
 
         var top = ImGui.GetCursorScreenPos().Y + S(8);
         ImGui.SetCursorScreenPos(new Vector2(min.X + pad, top));
@@ -123,7 +152,7 @@ public sealed class SidePanel
             W.Caption($"At the table  ({s.Roster.Entries.Count}/{s.Table.SeatsMax})");
             foreach (var e in s.Roster.Entries)
             {
-                var stack = s.Blackjack?.Seat(e.Seat)?.Bankroll ?? s.Poker?.Seat(e.Seat)?.Stack ?? 0;
+                var stack = s.Blackjack?.Seat(e.Seat)?.Bankroll ?? s.Poker?.Seat(e.Seat)?.Stack ?? s.Roulette?.Seat(e.Seat)?.Bankroll ?? 0;
                 PlayerRow(e, stack, host, s);
             }
             if (s.Roster.Entries.Count == 0) W.Muted("Nobody has sat down yet.");
@@ -134,14 +163,15 @@ public sealed class SidePanel
             ImGui.Dummy(new Vector2(1, S(8)));
             if (host.RebuyRequests.Count > 0)
             {
-                W.Caption("Rebuy requests");
+                W.Caption("Buy-back requests");
                 foreach (var r in host.RebuyRequests.ToList())
                 {
                     ImGui.TextUnformatted(SeatArt.ShortName(r.Name));
                     ImGui.SameLine(ImGui.GetContentRegionAvail().X - S(120));
-                    if (W.Button($"Approve##ap{r.Id}", new Vector2(S(70), S(26)), Tone.Success)) host.ApproveRebuy(r.Id);
+                    if (W.Button($"+{Gfx.Chips(host.RebuyAmount(r.Id))}##ap{r.Id}", new Vector2(S(84), S(26)), Tone.Success)) host.ApproveRebuy(r.Id);
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Approve: top them back up to the starting stack.");
                     ImGui.SameLine(0, S(4));
-                    if (W.IconButton($"deny{r.Id}", Icon.Close, S(26), "Deny")) host.DenyRebuy(r.Id);
+                    if (W.IconButton($"deny{r.Id}", Icon.Close, S(26), "Decline")) host.DenyRebuy(r.Id);
                 }
                 ImGui.Dummy(new Vector2(1, S(6)));
             }
@@ -168,7 +198,7 @@ public sealed class SidePanel
                     ImGui.TableNextColumn();
                     ImGui.TextColored(e.Net > 0 ? Pal.Green : e.Net < 0 ? Pal.Red : Pal.Muted, (e.Net > 0 ? "+" : "") + Gfx.Chips(e.Net));
                 }
-                if (host.Game.Kind == GameKind.Blackjack)
+                if (host.Game.Kind != GameKind.Poker)
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
@@ -193,13 +223,16 @@ public sealed class SidePanel
         var p = ImGui.GetCursorScreenPos();
         var w = ImGui.GetContentRegionAvail().X;
         var h = S(40);
-        dl.AddRectFilled(p, p + new Vector2(w, h), Pal.U(Pal.Panel2), S(8));
+        Gfx.ChamferPanel(dl, p, p + new Vector2(w, h), S(8), Pal.Panel2, Pal.Panel, e.Flags.HasFlag(RosterFlags.RebuyPending) ? Pal.A(Pal.Magenta, 0.7f) : Pal.Line);
         var tint = Pal.FromName(e.Name);
-        dl.AddCircleFilled(p + new Vector2(S(20), h / 2), S(13), Pal.U(Pal.Darken(tint, 0.35f)), 24);
+        Span<Vector2> hex = stackalloc Vector2[6];
+        Gfx.Hexagon(hex, p + new Vector2(S(20), h / 2), S(14));
+        Gfx.FillVertical(dl, hex, Pal.Darken(tint, 0.2f), Pal.Darken(tint, 0.6f));
         Gfx.TextCentered(dl, FontRole.Heading, S(14), p + new Vector2(S(20), h / 2 + S(1)), Pal.U(Pal.White), SeatArt.Initials(e.Name));
         var name = SeatArt.Fit(SeatArt.ShortName(e.Name), w - S(150), S(15));
         dl.AddText(p + new Vector2(S(40), S(4)), Pal.U(e.Seat == s.MySeat && s.IsSeated ? Pal.GoldLight : Pal.Text), name);
-        var sub = $"Seat {e.Seat + 1}" + (e.Flags.HasFlag(RosterFlags.SittingOut) ? "  ·  sitting out" : "") + (e.Flags.HasFlag(RosterFlags.Host) ? "  ·  host" : "");
+        var sub = $"Seat {e.Seat + 1}" + (e.Flags.HasFlag(RosterFlags.SittingOut) ? "  ·  sitting out" : "") + (e.Flags.HasFlag(RosterFlags.Host) ? "  ·  host" : "")
+                  + (e.Flags.HasFlag(RosterFlags.RebuyPending) ? "  ·  rebuy asked" : "");
         dl.AddText(UiEnv.Font(FontRole.Body, S(12)), S(12), p + new Vector2(S(40), S(22)), Pal.U(Pal.Muted), sub);
         var st = Gfx.Chips(stack);
         var sw = Gfx.TextSize(FontRole.Body, S(15), st).X;
@@ -239,7 +272,7 @@ public sealed class SidePanel
         sb.AppendLine($"{host.Options.Title} - ledger {DateTime.Now:yyyy-MM-dd HH:mm}");
         foreach (var e in ledger)
             sb.AppendLine($"{e.Name}: in {e.BuyIns:N0}, now {e.CashedOut + e.Current:N0}, net {(e.Net > 0 ? "+" : "")}{e.Net:N0}");
-        if (host.Game.Kind == GameKind.Blackjack) sb.AppendLine($"House: {(host.Game.HouseNet > 0 ? "+" : "")}{host.Game.HouseNet:N0}");
+        if (host.Game.Kind != GameKind.Poker) sb.AppendLine($"House: {(host.Game.HouseNet > 0 ? "+" : "")}{host.Game.HouseNet:N0}");
         return sb.ToString();
     }
 
@@ -265,7 +298,7 @@ public sealed class SidePanel
         ImGui.EndGroup();
         ImGui.Dummy(new Vector2(1, S(8)));
 
-        var commit = s?.Blackjack?.Commit ?? s?.Poker?.Commit;
+        var commit = s?.Blackjack?.Commit ?? s?.Poker?.Commit ?? s?.Roulette?.Commit;
         if (commit != null)
         {
             W.Caption("This round's commitment");
@@ -317,25 +350,16 @@ public sealed class SidePanel
         W.Caption("Table");
         ImGui.TextUnformatted(host.Options.Title);
         ImGui.PushStyleColor(ImGuiCol.Text, Pal.Muted);
-        ImGui.TextUnformatted($"{(host.Game.Kind == GameKind.Blackjack ? "Blackjack" : "No-Limit Hold'em")} on {app.ChannelLabel}");
+        ImGui.TextUnformatted($"{host.Game.Kind switch { GameKind.Blackjack => "Blackjack", GameKind.Roulette => "European Roulette", _ => "No-Limit Hold'em" }} on {app.ChannelLabel}");
         ImGui.TextUnformatted($"Table #{host.TableId:X4}  ·  {host.Players.Count}/{host.Game.MaxSeats} seated");
         ImGui.PopStyleColor();
         ImGui.Dummy(new Vector2(1, S(6)));
 
-        var bj = host.Game as BlackjackEngine;
-        var pk = host.Game as PokerEngine;
-        var startLabel = bj != null
-            ? bj.Phase is BjPhase.Betting ? "Deal now" : "Open betting"
-            : pk!.Phase == PokerPhase.Showdown ? "Next hand" : "Start hand";
-        var canStart = bj != null
-            ? bj.Phase is BjPhase.Waiting or BjPhase.Settled or BjPhase.Betting
-            : pk!.Phase is PokerPhase.Waiting or PokerPhase.Starting or PokerPhase.Showdown && host.Players.Count >= 2;
+        var (startLabel, canStart, hint) = HostControls.Start(host);
         if (W.Button($"{startLabel}##hoststart", new Vector2(w, S(38)), Tone.Primary, canStart && !host.Game.Paused, icon: Icon.Play)) host.StartNow();
         if (W.Button(host.Game.Paused ? "Resume table##pause" : "Pause after this round##pause", new Vector2(w, S(34)), host.Game.Paused ? Tone.Success : Tone.Neutral, icon: host.Game.Paused ? Icon.Play : Icon.Pause))
             host.SetPaused(!host.Game.Paused);
-        W.Muted(bj != null
-            ? bj.Rules.AutoDeal ? "Auto-deal is on: betting opens by itself after each round." : "Auto-deal is off: open betting yourself each round."
-            : pk!.Rules.AutoStart ? "Hands start automatically while two or more players are seated." : "Start each hand yourself.");
+        W.Muted(hint);
 
         ImGui.Dummy(new Vector2(1, S(10)));
         W.Caption("Linkshell traffic");

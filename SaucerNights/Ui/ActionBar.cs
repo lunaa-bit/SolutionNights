@@ -4,6 +4,7 @@ using SaucerNights.App;
 using SaucerNights.Core.Blackjack;
 using SaucerNights.Core.Poker;
 using SaucerNights.Core.Protocol;
+using SaucerNights.Core.Roulette;
 using SaucerNights.Core.Sessions;
 
 namespace SaucerNights.Ui;
@@ -41,41 +42,40 @@ public sealed class ActionBar
     {
         _hints = app.Settings.KeyboardShortcuts;
         var dl = ImGui.GetWindowDrawList();
-        Gfx.RoundedGradient(dl, min, max, 0, Pal.Hex(0x161C24), Pal.Hex(0x0E1217));
-        dl.AddRectFilledMultiColor(min, new Vector2((min.X + max.X) / 2, min.Y + S(1.5f)), Pal.U(Pal.Gold, 0), Pal.U(Pal.Gold, 0.8f), Pal.U(Pal.Gold, 0.8f), Pal.U(Pal.Gold, 0));
-        dl.AddRectFilledMultiColor(new Vector2((min.X + max.X) / 2, min.Y), new Vector2(max.X, min.Y + S(1.5f)), Pal.U(Pal.Gold, 0.8f), Pal.U(Pal.Gold, 0), Pal.U(Pal.Gold, 0), Pal.U(Pal.Gold, 0.8f));
+        W.Glass(dl, min, max, S(16));
 
         var pad = S(16);
         var inner = new Vector2(min.X + pad, min.Y + S(14));
         var innerMax = new Vector2(max.X - pad, max.Y - S(12));
 
         // Left: the player's chips.
-        var leftW = S(190);
+        var leftW = S(176);
         DrawStack(dl, inner, s, app);
 
         // Right: seat controls.
         var rightW = S(132);
         SeatControls(s, new Vector2(innerMax.X - rightW, inner.Y), rightW);
 
-        var mid = new Vector2(inner.X + leftW, inner.Y);
-        var midW = innerMax.X - rightW - S(14) - mid.X;
-        ImGui.SetCursorScreenPos(mid);
+        var midP = new Vector2(inner.X + leftW, inner.Y);
+        var midW = innerMax.X - rightW - S(14) - midP.X;
+        ImGui.SetCursorScreenPos(midP);
         if (!s.IsSeated)
         {
             Spectator(s, app, midW);
             return;
         }
-        if (s.Blackjack is { } bj) Blackjack(s, bj, app, mid, midW, focused);
-        else if (s.Poker is { } pk) Poker(s, pk, app, mid, midW, focused);
+        if (s.Blackjack is { } bj) Blackjack(s, bj, app, midP, midW, focused);
+        else if (s.Poker is { } pk) Poker(s, pk, app, midP, midW, focused);
+        else if (s.Roulette is { } rl) Roulette(s, rl, midP, midW, focused);
     }
 
     private static void DrawStack(ImDrawListPtr dl, Vector2 p, ClientSession s, GameApp app)
     {
         long? stack = null;
         if (s.IsSeated)
-            stack = s.Blackjack?.Seat(s.MySeat)?.Bankroll ?? s.Poker?.Seat(s.MySeat)?.Stack;
+            stack = s.Blackjack?.Seat(s.MySeat)?.Bankroll ?? s.Poker?.Seat(s.MySeat)?.Stack ?? s.Roulette?.Seat(s.MySeat)?.Bankroll;
         var dealer = string.Equals(s.Table.HostId, s.SelfId, StringComparison.OrdinalIgnoreCase);
-        dl.AddText(UiEnv.Font(FontRole.Body, S(12)), S(12), p, Pal.U(Pal.Muted), s.IsSeated ? "YOUR CHIPS" : dealer ? "DEALING" : "WATCHING");
+        Gfx.TextSpaced(dl, FontRole.Body, S(11.5f), p, Pal.U(Pal.Accent, 0.85f), s.IsSeated ? "YOUR CHIPS" : dealer ? "DEALING" : "WATCHING", S(1.2f));
         if (stack is { } v)
         {
             ChipArt.Top(dl, p + new Vector2(S(14), S(40)), S(13), ChipArt.For(Math.Max(1, v)), 1, false);
@@ -96,18 +96,28 @@ public sealed class ActionBar
         var bh = S(36);
         if (!s.IsSeated) return;
         var sittingOut = s.Blackjack?.Seat(s.MySeat)?.Status == BjSeatStatus.SittingOut
-                         || s.Poker?.Seat(s.MySeat)?.Status == PokerSeatStatus.SittingOut;
+                         || s.Poker?.Seat(s.MySeat)?.Status == PokerSeatStatus.SittingOut
+                         || s.Roulette?.Seat(s.MySeat)?.Status == RouletteSeatStatus.SittingOut;
         ImGui.SetCursorScreenPos(p);
         if (W.Button(sittingOut ? "I'm back##sitin" : "Sit out##sitout", new Vector2(width, bh), sittingOut ? Tone.Success : Tone.Neutral, icon: sittingOut ? Icon.Play : Icon.Pause))
             s.SitOut(!sittingOut);
-        var stack = s.Blackjack?.Seat(s.MySeat)?.Bankroll ?? s.Poker?.Seat(s.MySeat)?.Stack ?? 0;
-        var starting = s.Table.BlackjackRules?.StartingStack ?? s.Table.PokerRules?.StartingStack ?? 0;
-        var between = s.Blackjack is { Phase: BjPhase.Betting or BjPhase.Waiting or BjPhase.Settled } || s.Poker is { Phase: PokerPhase.Waiting or PokerPhase.Showdown or PokerPhase.Starting };
-        var canRebuy = stack < starting && between;
+        var rs = s.Roulette?.Seat(s.MySeat);
+        var stack = s.Blackjack?.Seat(s.MySeat)?.Bankroll ?? s.Poker?.Seat(s.MySeat)?.Stack ?? (rs != null ? rs.Bankroll + rs.TotalBet : 0);
+        var starting = s.Table.BlackjackRules?.StartingStack ?? s.Table.PokerRules?.StartingStack ?? s.Table.RouletteRules?.StartingStack ?? 0;
+        var between = s.Blackjack is { Phase: BjPhase.Betting or BjPhase.Waiting or BjPhase.Settled } || s.Poker is { Phase: PokerPhase.Waiting or PokerPhase.Showdown or PokerPhase.Starting }
+                      || s.Roulette is { Phase: RoulettePhase.Waiting or RoulettePhase.Settled } || (s.Roulette is { Phase: RoulettePhase.Betting } && rs is { TotalBet: 0 });
+        var pending = s.RebuyPending;
+        var canRebuy = stack < starting && between && !pending;
         ImGui.SetCursorScreenPos(p + new Vector2(0, bh + S(8)));
-        if (W.Button("Rebuy##rebuy", new Vector2(width, bh), Tone.Neutral, canRebuy, icon: Icon.Plus))
+        if (W.Button(pending ? "Asked host...##rebuy" : "Rebuy##rebuy", new Vector2(width, bh), Tone.Neutral, canRebuy, icon: pending ? Icon.Users : Icon.Plus))
             s.RequestRebuy();
-        if (ImGui.IsItemHovered() && !canRebuy) ImGui.SetTooltip(stack >= starting ? "You have at least the starting stack." : "Rebuy between hands.");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(pending ? "Waiting for the host to approve your rebuy."
+                : stack >= starting ? "You have at least the starting stack."
+                : !between ? "Rebuy between hands."
+                : $"Ask the host to top you back up to {starting:N0}.");
+        }
     }
 
     private static void Spectator(ClientSession s, GameApp app, float width)
@@ -138,7 +148,7 @@ public sealed class ActionBar
             default:
                 title = s.Table.HostId == s.SelfId ? "You're the dealer" : "You're watching";
                 sub = s.Table.HostId == s.SelfId
-                    ? "Run the table from the Host tab. Players join from their lobby."
+                    ? "Players join from their lobby."
                     : "Click an open seat (or Take a seat) to play. Watching is free.";
                 break;
         }
@@ -151,6 +161,18 @@ public sealed class ActionBar
             ImGui.SetCursorScreenPos(new Vector2(p.X + width - S(170), p.Y + S(10)));
             if (W.Button("Take a seat##join", new Vector2(S(170), S(48)), Tone.Primary, s.Table.SeatsTaken < s.Table.SeatsMax, icon: Icon.Users, fontSize: S(17)))
                 s.Join();
+        }
+        else if (app.Hub.Host is { } host && s.Table.HostId == s.SelfId)
+        {
+            // The dealer runs the table from here too.
+            var (label, canStart, _) = HostControls.Start(host);
+            var bw = Math.Min(S(170), (width - S(10)) / 3);
+            ImGui.SetCursorScreenPos(new Vector2(p.X + width - bw * 2 - S(10), p.Y + S(8)));
+            if (W.Button($"{label}##dockstart", new Vector2(bw, S(52)), Tone.Primary, canStart && !host.Game.Paused, icon: Icon.Play)) host.StartNow();
+            ImGui.SameLine(0, S(10));
+            if (W.Button(host.Game.Paused ? "Resume##dockpause" : "Pause##dockpause", new Vector2(bw, S(52)), host.Game.Paused ? Tone.Success : Tone.Neutral,
+                    icon: host.Game.Paused ? Icon.Play : Icon.Pause))
+                host.SetPaused(!host.Game.Paused);
         }
     }
 
@@ -200,7 +222,7 @@ public sealed class ActionBar
             var valid = _bet >= rules.MinBet && _bet <= rules.MaxBet && _bet <= me.Bankroll;
             var placed = me.Bet > 0;
             var label = placed ? (me.Bet == _bet ? $"Bet in: {me.Bet:N0}##bjplace" : $"Change bet to {_bet:N0}##bjplace") : $"Bet {_bet:N0}##bjplace";
-            if (W.Button(label, new Vector2(placeW, S(68)), placed && me.Bet == _bet ? Tone.Success : Tone.Primary, valid && !(placed && me.Bet == _bet), K("Enter"),
+            if (W.Button(label, new Vector2(placeW, S(68)), placed && me.Bet == _bet ? Tone.Success : Tone.Gold, valid && !(placed && me.Bet == _bet), K("Enter"),
                     $"Limits {rules.MinBet:N0} - {rules.MaxBet:N0}", font: FontRole.Heading, fontSize: S(24))
                 || (focused && valid && ImGui.IsKeyPressed(ImGuiKey.Enter) && !(placed && me.Bet == _bet)))
             {
@@ -234,7 +256,7 @@ public sealed class ActionBar
             {
                 ("Hit", BjActions.Hit, BjActionKind.Hit, Tone.Success, "H", ImGuiKey.H, null),
                 ("Stand", BjActions.Stand, BjActionKind.Stand, Tone.Danger, "S", ImGuiKey.S, null),
-                ("Double", BjActions.Double, BjActionKind.Double, Tone.Primary, "D", ImGuiKey.D, $"+{hand.Bet:N0}"),
+                ("Double", BjActions.Double, BjActionKind.Double, Tone.Gold, "D", ImGuiKey.D, $"+{hand.Bet:N0}"),
                 ("Split", BjActions.Split, BjActionKind.Split, Tone.Info, "P", ImGuiKey.P, $"+{hand.Bet:N0}"),
                 ("Surrender", BjActions.Surrender, BjActionKind.Surrender, Tone.Neutral, "R", ImGuiKey.R, $"get {hand.Bet / 2:N0}"),
             };
@@ -264,6 +286,94 @@ public sealed class ActionBar
                 > 0 => ($"You won {me.RoundNet:N0}", "Next round starting shortly."),
                 < 0 => ($"You lost {-me.RoundNet:N0}", "Next round starting shortly."),
                 _ => (me.Hands.Count > 0 ? "Push" : "Round over", "Next round starting shortly."),
+            },
+        };
+        dl.AddText(UiEnv.Font(FontRole.Heading, S(26)), S(26), p + new Vector2(0, S(4)), Pal.U(Pal.Text), status.Item1);
+        dl.AddText(UiEnv.Font(FontRole.Body, S(14)), S(14), p + new Vector2(0, S(40)), Pal.U(Pal.Muted), status.Item2);
+    }
+
+    // ───────────── Roulette ─────────────
+
+    /// <summary>The player's bets in progress, owned by the roulette scene.</summary>
+    public RouletteDraft? RouletteDraft { get; set; }
+
+    private void Roulette(ClientSession s, RouletteView v, Vector2 p, float width, bool focused)
+    {
+        var rules = s.Table.RouletteRules ?? new RouletteRules();
+        var me = v.Seat(s.MySeat);
+        var d = RouletteDraft;
+        if (me == null || d == null) return;
+        var dl = ImGui.GetWindowDrawList();
+
+        if (v.Phase == RoulettePhase.Betting && me.Status != RouletteSeatStatus.SittingOut)
+        {
+            // Chip to bet with.
+            var chips = new List<ChipArt.Denom> { ChipArt.For(rules.MinBet) with { Value = rules.MinBet, Label = Gfx.Chips(rules.MinBet) } };
+            chips.AddRange(ChipArt.Denoms.Where(c => c.Value > rules.MinBet && c.Value <= rules.MaxBet).Take(5));
+            if (!chips.Any(c => c.Value == d.Chip)) d.Chip = chips[0].Value;
+            var r = S(19);
+            var x = p.X + r;
+            foreach (var c in chips)
+            {
+                var cc = new Vector2(x, p.Y + S(27));
+                ImGui.SetCursorScreenPos(cc - new Vector2(r));
+                if (ImGui.InvisibleButton($"##rchip{c.Value}", new Vector2(r * 2))) d.Chip = c.Value;
+                var hovered = ImGui.IsItemHovered();
+                if (hovered) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                var sel = d.Chip == c.Value;
+                var lift = sel ? S(5) : hovered ? S(2) : 0;
+                if (sel) Gfx.GlowCircle(dl, cc - new Vector2(0, lift), r, Pal.Accent, S(9), 1f);
+                ChipArt.Top(dl, cc - new Vector2(0, lift), r, c);
+                if (sel) dl.AddCircle(cc - new Vector2(0, lift), r + S(2.5f), Pal.U(Pal.Accent), 32, S(2));
+                x += r * 2 + S(7);
+            }
+            dl.AddText(UiEnv.Font(FontRole.Body, S(12)), S(12), new Vector2(p.X, p.Y + S(58)), Pal.U(Pal.Muted), SeatArt.Fit("Pick a chip, then click the board", x - p.X - S(4), S(12)));
+
+            var bx = x + S(4);
+            var budget = Math.Min(rules.TableMax, me.Bankroll + me.Bets.Sum(b => b.Amount));
+            ImGui.SetCursorScreenPos(new Vector2(bx, p.Y + S(2)));
+            if (W.Button("Clear##rclear", new Vector2(S(86), S(30)), Tone.Neutral, d.Total > 0)) d.Bets.Clear();
+            ImGui.SetCursorScreenPos(new Vector2(bx, p.Y + S(38)));
+            var repeat = d.Last.Where(b => b.Amount >= rules.MinBet).ToList();
+            if (W.Button("Repeat##rrepeat", new Vector2(S(86), S(30)), Tone.Neutral, repeat.Count > 0 && repeat.Sum(b => b.Amount) <= budget))
+            {
+                d.Bets.Clear();
+                foreach (var (i, a) in repeat) d.Bets[i] = a;
+            }
+            if (ImGui.IsItemHovered() && repeat.Count > 0) ImGui.SetTooltip($"Put last spin's bets back: {repeat.Sum(b => b.Amount):N0}");
+
+            var placed = me.Bets;
+            var placedTotal = placed.Sum(b => b.Amount);
+            var differs = d.Differs(placed);
+            string label;
+            Tone tone;
+            bool enabled;
+            if (!differs && placed.Count > 0) (label, tone, enabled) = ($"Bets in: {placedTotal:N0}", Tone.Success, true);
+            else if (d.Total == 0 && placed.Count > 0) (label, tone, enabled) = ("Take bets back", Tone.Neutral, true);
+            else (label, tone, enabled) = (placed.Count > 0 ? $"Update: {d.Total:N0}" : $"Bet {d.Total:N0}", Tone.Gold, d.Total > 0 && d.Total <= budget);
+            var placeW = Math.Max(S(170), p.X + width - (bx + S(96)));
+            ImGui.SetCursorScreenPos(new Vector2(p.X + width - placeW, p.Y + S(2)));
+            var spots = d.Bets.Count(b => b.Value > 0);
+            if (W.Button($"{label}##rplace", new Vector2(placeW, S(70)), tone, enabled && !s.AwaitingHost, K("Enter"),
+                    $"{spots} of {RouletteBets.MaxSpots} spots  ·  table max {rules.TableMax:N0}", font: FontRole.Heading, fontSize: S(24))
+                || (focused && enabled && !s.AwaitingHost && ImGui.IsKeyPressed(ImGuiKey.Enter)))
+            {
+                if (differs) s.PlaceRouletteBets(d.List());
+            }
+            return;
+        }
+
+        var onTable = me.Bets.Sum(b => b.Amount);
+        var status = v.Phase switch
+        {
+            RoulettePhase.Betting => ("Sitting out", "Press \"I'm back\" to play the next spin."),
+            RoulettePhase.Waiting => ("Waiting for the next spin", "Betting opens when the dealer is ready."),
+            RoulettePhase.Spinning => ("No more bets", onTable > 0 ? $"You have {onTable:N0} on {me.Bets.Count} spot{(me.Bets.Count == 1 ? "" : "s")}." : "You sat this spin out."),
+            _ => me.RoundNet switch
+            {
+                > 0 => ($"You won {me.RoundNet:N0}", $"{v.Result} {(v.Result == 0 ? "green" : RouletteArt.IsRed(v.Result) ? "red" : "black")}. Next spin shortly."),
+                < 0 => ($"You lost {-me.RoundNet:N0}", $"{v.Result} {(v.Result == 0 ? "green" : RouletteArt.IsRed(v.Result) ? "red" : "black")}. Next spin shortly."),
+                _ => (v.Result <= 36 ? $"{v.Result} {(v.Result == 0 ? "green" : RouletteArt.IsRed(v.Result) ? "red" : "black")}" : "Spin over", "Next spin shortly."),
             },
         };
         dl.AddText(UiEnv.Font(FontRole.Heading, S(26)), S(26), p + new Vector2(0, S(4)), Pal.U(Pal.Text), status.Item1);
@@ -349,7 +459,9 @@ public sealed class ActionBar
         long PotTo(double f) => Math.Clamp(v.CurrentBet + (long)(potAfterCall * f), minTo, maxTo);
 
         var canRaise = (a & (PokerActions.Bet | PokerActions.Raise)) != 0 && maxTo > v.CurrentBet;
-        var btnW = S(150);
+        // Leave room for the sizing presets and slider; the three buttons share what's left.
+        var sizing = canRaise ? Math.Clamp(width * 0.36f, S(190), S(300)) : 0;
+        var btnW = Math.Clamp((width - sizing - S(36)) / 2.8f, S(96), S(150));
         var y = p.Y + S(2);
 
         if (_confirmFold)
@@ -381,20 +493,20 @@ public sealed class ActionBar
         var raiseX = ImGui.GetCursorScreenPos().X;
         var allIn = _raiseTo >= maxTo;
         var raiseLabel = allIn ? "All-in##raise" : v.CurrentBet == 0 ? "Bet##raise" : "Raise to##raise";
-        if (W.Button(raiseLabel, new Vector2(btnW, S(76)), Tone.Primary, canRaise || a.HasFlag(PokerActions.AllIn), K("R"), _raiseTo.ToString("N0"), font: FontRole.Heading, fontSize: S(24))
+        if (W.Button(raiseLabel, new Vector2(btnW, S(76)), Tone.Gold, canRaise || a.HasFlag(PokerActions.AllIn), K("R"), _raiseTo.ToString("N0"), font: FontRole.Heading, fontSize: S(24))
             || (focused && ImGui.IsKeyPressed(ImGuiKey.R) && canRaise))
             s.Act((byte)(allIn ? PokerActionKind.AllIn : PokerActionKind.BetOrRaise), _raiseTo);
 
         // Sizing controls.
         var sx = raiseX + btnW + S(16);
         var sw = p.X + width - sx;
-        if (sw < S(160) || !canRaise) return;
+        if (sw < S(150) || !canRaise) return;
         var presets = new (string, long)[] { ("Min", minTo), ("½", PotTo(0.5)), ("¾", PotTo(0.75)), ("Pot", PotTo(1)), ("Max", maxTo) };
         var pw = (sw - S(6) * (presets.Length - 1)) / presets.Length;
         ImGui.SetCursorScreenPos(new Vector2(sx, y));
         foreach (var (label, amount) in presets)
         {
-            if (W.Button($"{label}##preset{label}", new Vector2(pw, S(30)), _raiseTo == amount ? Tone.Info : Tone.Neutral)) _raiseTo = amount;
+            if (W.Button($"{label}##preset{label}", new Vector2(pw, S(30)), _raiseTo == amount ? Tone.Primary : Tone.Neutral)) _raiseTo = amount;
             ImGui.SameLine(0, S(6));
         }
         ImGui.SetCursorScreenPos(new Vector2(sx, y + S(40)));

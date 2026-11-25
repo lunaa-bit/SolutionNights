@@ -148,8 +148,7 @@ public static class ChipArt
         var w = ts.X + h * 1.35f;
         var min = center - new Vector2(w / 2, h / 2);
         var max = center + new Vector2(w / 2, h / 2);
-        dl.AddRectFilled(min, max, Pal.U(Pal.Hex(0x0B0E12), 0.82f * alpha), h / 2);
-        dl.AddRect(min, max, Pal.U(accent ?? Pal.Gold, 0.45f * alpha), h / 2, ImDrawFlags.None, 1f);
+        Gfx.ChamferPanel(dl, min, max, h * 0.3f, Pal.Hex(0x0C1230, 0.88f * alpha), Pal.Hex(0x060918, 0.88f * alpha), Pal.A(accent ?? Pal.Gold, 0.55f * alpha), 1f, all: true);
         Top(dl, new Vector2(min.X + h / 2, center.Y), h * 0.34f, For(amount), alpha, label: false);
         dl.AddText(UiEnv.Font(FontRole.Body, size), size, new Vector2(min.X + h * 0.95f, center.Y - ts.Y / 2), Pal.U(Pal.Text, alpha), text);
     }

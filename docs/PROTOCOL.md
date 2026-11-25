@@ -1,4 +1,4 @@
-# Saucer Nights protocol
+# Solution Nights protocol
 
 Everything travels as ordinary chat lines on one channel (a cross-world linkshell by default). The game server already
 authenticates who sent each line, so a player's chat identity (`Name@World`) is their identity at the table.
@@ -30,7 +30,8 @@ frame = u16 tableId | varint seq | u8 type | payload | u16 crc16
 | `Bet` (5) | player → host | round, amount, shuffle seed (8 B) |
 | `Ready` (6) | player → host | hand, shuffle seed (poker, provably fair tables) |
 | `Resync` (7) | player → host | needs: roster / state / welcome |
-| `Rebuy` (8), `SitOut` (9) | player → host | —, flag |
+| `Rebuy` (8), `SitOut` (9) | player → host | —, flag (a rebuy is a request; see below) |
+| `RouletteBet` (10) | player → host | round, seed (8 B), count, (bet index, amount)… — the player's whole layout |
 | `Announce` (32) | host → all | game, version, title, host name, seats, flags, rules |
 | `Welcome` (33) / `Reject` (34) | host → player | nonce + seat + host public key / nonce + reason |
 | `Roster` (35) | host → all | version, (seat, Name@World, flags)… |
@@ -39,6 +40,33 @@ frame = u16 tableId | varint seq | u8 type | payload | u16 crc16
 
 Moves carry the snapshot's `turnId`, so retries are idempotent and stale moves are ignored. `Join` from a player who is
 already seated re-keys them and keeps their seat and chips.
+
+## Threat model
+
+The protocol assumes everyone has the source (it is public). Secrets are per-session keys, never anything in the
+code:
+
+- Hole cards are sealed per seat with a key from an ECDH (P-256) exchange between that player and the host, made when
+  the player sits down. Other players, spectators and anyone else in the linkshell see only sealed bytes.
+- The blackjack dealer's hole card is sent as hidden until the dealer plays; poker snapshots carry no cards in the
+  clear until a hand is shown at the end.
+- The game server attaches the sender to every chat line. Clients drop table messages that don't come from the host's
+  character; the host maps every move to the sender's own seat and the engine rejects anything out of turn or against
+  the rules.
+- The host is trusted with the deck. Provably fair shuffles stop the host from stacking it, but the host's client
+  necessarily knows every card, so a host who also plays hold'em is flagged (`HostPlays`) to everyone.
+
+`CheatingTests` checks each of these with a cheater running the real code.
+
+## Buying back in
+
+`Rebuy` asks the host to top the player back up to the starting stack. At a real table the host must approve it:
+the request is listed in the host's table window, the player's roster entry gets the `RebuyPending` flag (8) until
+the host answers, and the events `RebuyAsked` (11) and `RebuyDenied` (12) or `Rebuy` (6) are logged. Practice
+tables approve their bots automatically.
+
+The host remembers the chips each player left with. Sitting down again at the same table returns those chips rather
+than a new buy-in; a player who left with nothing comes back with an empty stack and a rebuy request for the host.
 
 ## Snapshots
 
@@ -84,6 +112,32 @@ adds a second, never-revealed secret (`PokerFair`):
 
 Unshown hands, undealt board cards and empty seats stay hashes, so their cards cannot be derived. A player's own cards
 are only checked against the commitment when they are shown.
+
+## Roulette
+
+Single-zero (European) roulette, game 3, protocol version 2. The host is the house and never sits.
+
+- **Bets** travel as a byte index into a fixed table of every legal bet (`RouletteBets.All`, 157 entries): straights
+  0–36 (index = number), 60 splits (0/1, 0/2, 0/3 first), 12 streets, trios 0/1/2 and 0/2/3, 22 corners, first four
+  0/1/2/3, 11 six lines, three dozens, three columns, red, black, odd, even, 1-18, 19-36. Each entry has a 37-bit mask
+  of the numbers it covers; a winning bet returns stake × 36 / numbers covered.
+- **`RouletteBet`** carries the player's complete layout for the round. It replaces whatever they had down, so a lost
+  or repeated line is harmless, and an empty list takes everything back. The host ignores the whole message unless the
+  round is the current one and betting is open, there are at most 12 spots, each index is known and listed once, each
+  amount is within the spot limits, and the total is within the table max and the player's chips (counting what they
+  already have down). Accepted chips leave the player's bankroll at once.
+- **Flow:** `Waiting` → `Betting` (opens by itself unless the host turned auto-spin off; the betting clock starts at the
+  first bet, plus 2 s of grace for lines in flight) → `Spinning` (no more bets; the winning number is in the snapshot
+  so clients can animate the ball to it; 7 s) → `Settled` (paid, history updated, seeds revealed; 5 s) → `Betting`.
+  A player who leaves while betting is open gets their chips back; once the wheel turns, their bets go to the house.
+  Pausing closes an empty betting window; a spin with chips on it still finishes, then the table waits.
+- **Snapshot:** phase, round, deadline, result (255 = none), last 12 results, and per seat: status, bankroll,
+  (index, amount) per bet, net for the last spin. Commitment while betting/spinning, reveal once settled.
+- **Provably fair:** the commitment is published when betting opens, before any bet. The number is
+  `FairRng(HMAC-SHA256(serverSeed, "…roulette/v1" | table | round | (seat | seed)… in seat order)).NextInt(37)`, the
+  same rejection sampling as the shuffle, over the seeds of everyone with chips down when the wheel starts. Clients
+  check the commitment, that their own seed was used if they had bets, that every seat still showing bets has a seed
+  in the draw, and that the seeds give the number the ball landed on.
 
 ## Showing cards after the hand
 

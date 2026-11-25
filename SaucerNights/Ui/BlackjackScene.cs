@@ -54,11 +54,10 @@ public sealed class BlackjackScene
         _a.Discard = discard;
         _a.BannerY = 0.37f;
 
-        TableArt.Backdrop(dl, min, max);
         TableArt.BlackjackTable(dl, top, radii, app.Settings.Felt,
             $"BLACKJACK PAYS {rules.PayoutText.ToUpperInvariant()}",
             rules.DealerHitsSoft17 ? "Dealer hits soft 17" : "Dealer must stand on all 17s",
-            rules.Insurance ? "INSURANCE PAYS 2 TO 1" : "NO INSURANCE");
+            rules.Insurance ? "INSURANCE PAYS 2 TO 1" : "NO INSURANCE", now);
         TableArt.ChipTray(dl, tray, new Vector2(radii.X * 0.4f, radii.Y * 0.075f));
         TableArt.Shoe(dl, shoe, ch);
         TableArt.Discard(dl, discard, ch);
@@ -68,7 +67,7 @@ public sealed class BlackjackScene
 
         if (v == null)
         {
-            Gfx.TextCentered(dl, FontRole.Heading, S(28), top + new Vector2(0, radii.Y * 0.5f), Pal.U(Pal.Text, 0.7f), "Connecting to the table...");
+            Gfx.TextGlow(dl, FontRole.Heading, S(28), top + new Vector2(0, radii.Y * 0.5f), Pal.Accent, "CONNECTING TO THE TABLE...", 0.8f, 0.8f);
             _a.EndFrame(now);
             return;
         }
@@ -91,7 +90,7 @@ public sealed class BlackjackScene
         if (v.Phase == BjPhase.Betting)
         {
             var left = s.SecondsLeft(app.Clock.Now);
-            Gfx.TextCentered(dl, FontRole.Heading, S(30), msgPos, Pal.U(Pal.GoldLight, 0.9f), "PLACE YOUR BETS", 0.6f);
+            Gfx.TextGlow(dl, FontRole.Heading, S(30), msgPos, Pal.Gold, "PLACE YOUR BETS", 1f, 0.95f);
             if (!double.IsNaN(left))
                 Gfx.TextCentered(dl, FontRole.Body, S(16), msgPos + new Vector2(0, S(26)), Pal.U(Pal.Text, 0.75f), $"Dealing in {Math.Ceiling(left):0}s");
             else
@@ -99,11 +98,11 @@ public sealed class BlackjackScene
         }
         else if (v.Phase == BjPhase.Waiting)
         {
-            Gfx.TextCentered(dl, FontRole.Heading, S(26), msgPos, Pal.U(Pal.Text, 0.55f), s.Table.Flags.HasFlag(Core.Protocol.TableFlags.Paused) ? "TABLE PAUSED" : "WAITING FOR PLAYERS", 0.5f);
+            Gfx.TextGlow(dl, FontRole.Heading, S(26), msgPos, TableArt.Felt(app.Settings.Felt).Neon, s.Table.Flags.HasFlag(Core.Protocol.TableFlags.Paused) ? "TABLE PAUSED" : "WAITING FOR PLAYERS", 0.7f, 0.75f);
         }
         else if (v.Phase == BjPhase.Insurance)
         {
-            Gfx.TextCentered(dl, FontRole.Heading, S(26), msgPos, Pal.U(Pal.GoldLight, 0.9f), "INSURANCE?", 0.6f);
+            Gfx.TextGlow(dl, FontRole.Heading, S(26), msgPos, Pal.Gold, "INSURANCE?", 1f, 0.95f);
         }
 
         _a.EndFrame(now);
@@ -121,7 +120,7 @@ public sealed class BlackjackScene
     {
         var circle = OnEllipse(top, radii, 0.79f, theta);
         var plate = OnEllipse(top, radii, 0.99f, theta) + new Vector2(0, S(8));
-        var half = SeatArt.Size.X / 2 + S(8);
+        var half = SeatArt.Size.X / 2 + S(18);
         plate.X = Math.Clamp(plate.X, _min.X + half, _max.X - half);
         var toward = Vector2.Normalize(top + new Vector2(0, radii.Y * 0.3f) - circle);
         var circleR = ch * 0.4f;
@@ -135,12 +134,16 @@ public sealed class BlackjackScene
         var (circle, plate, cardsBase, circleR) = SeatGeometry(top, radii, theta, ch);
         var sv = v.Seat(i);
         var isMe = s.IsSeated && s.MySeat == i;
-        var print = TableArt.Felt(_felt).Print;
+        var (_, _, print, neon) = TableArt.Felt(_felt);
 
-        // Betting circle.
-        dl.AddCircleFilled(circle, circleR, Pal.U(Pal.Black, 0.12f), 40);
-        dl.AddCircle(circle, circleR, Pal.U(isMe ? Pal.GoldLight : print, isMe ? 0.75f : 0.35f), 40, S(isMe ? 2f : 1.4f));
-        dl.AddCircle(circle, circleR * 0.82f, Pal.U(print, 0.12f), 40, S(1));
+        // Betting spot: a hexagon ring, lit for the local player.
+        Span<Vector2> hex = stackalloc Vector2[6];
+        Gfx.Hexagon(hex, circle, circleR, 0);
+        Gfx.FillConvex(dl, hex, Pal.U(Pal.Black, 0.16f));
+        if (isMe) Gfx.NeonOutline(dl, hex, Pal.A(Pal.Gold, 0.85f), S(1.8f), 0.8f);
+        else Gfx.Outline(dl, hex, Pal.U(neon, 0.4f), S(1.4f));
+        Gfx.Hexagon(hex, circle, circleR * 0.8f, 0);
+        Gfx.Outline(dl, hex, Pal.U(print, 0.1f), S(1));
 
         if (sv == null)
         {
@@ -207,8 +210,12 @@ public sealed class BlackjackScene
 
         // Plate.
         var frac = TimerFraction(s, rules, v, clockNow);
+        var flags = s.Roster.BySeat(i)?.Flags ?? Core.Protocol.RosterFlags.None;
+        var between = v.Phase is BjPhase.Betting or BjPhase.Waiting or BjPhase.Settled;
         var badge = sv.Status switch
         {
+            _ when flags.HasFlag(Core.Protocol.RosterFlags.RebuyPending) && between => ("REBUY ASKED", Pal.Magenta),
+            _ when sv.Bankroll < rules.MinBet && between && sv.Bet == 0 => ("OUT OF CHIPS", Pal.Red),
             BjSeatStatus.SittingOut => ("SITTING OUT", Pal.Muted),
             BjSeatStatus.BetPlaced when v.Phase == BjPhase.Betting => ("BET IN", Pal.Green),
             _ when v.Phase == BjPhase.Insurance && sv.InsuranceState == InsuranceState.Taken => ("INSURED", Pal.Blue),
@@ -264,9 +271,11 @@ public sealed class BlackjackScene
         var ts = Gfx.TextSize(FontRole.Body, fs, text);
         var min = c - new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
         var max = c + new Vector2(ts.X / 2 + S(9), ts.Y / 2 + S(3));
-        Gfx.Shadow(dl, min, max, S(10), S(4), 0.4f, new Vector2(0, S(2)));
-        dl.AddRectFilled(min, max, Pal.U(strong ? Pal.Mix(col, Pal.Black, 0.25f) : Pal.Hex(0x0D1116), 0.94f), S(10));
-        dl.AddRect(min, max, Pal.U(col, strong ? 1f : 0.7f), S(10), ImDrawFlags.None, S(1.2f));
+        Gfx.Shadow(dl, min, max, S(4), S(4), 0.4f, new Vector2(0, S(2)));
+        var cut = (max.Y - min.Y) * 0.32f;
+        Gfx.ChamferPanel(dl, min, max, cut, strong ? Pal.Mix(col, Pal.Black, 0.3f) : Pal.Hex(0x0E1530, 0.95f), strong ? Pal.Mix(col, Pal.Black, 0.5f) : Pal.Hex(0x080C1E, 0.95f),
+            Pal.A(col, strong ? 1f : 0.7f), S(1.2f), all: true);
+        if (strong) Gfx.ChamferGlow(dl, min, max, cut, col, S(6), 0.6f, all: true);
         dl.AddText(UiEnv.Font(FontRole.Body, fs), fs, c - ts / 2, Pal.U(strong ? Pal.White : Pal.Mix(col, Pal.White, 0.4f)), text);
     }
 

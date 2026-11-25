@@ -10,16 +10,16 @@ public static class CardArt
 {
     public const float Aspect = 0.714f;
 
-    public static CardBackStyle Back = CardBackStyle.Crimson;
+    public static CardBackStyle Back = CardBackStyle.Neon;
     public static bool FourColor;
 
-    private static readonly Vector4 Face = Pal.Hex(0xFCFAF4);
-    private static readonly Vector4 FaceShade = Pal.Hex(0xEFE8D8);
-    private static readonly Vector4 Edge = Pal.Hex(0xCFC6B3);
-    private static readonly Vector4 RedInk = Pal.Hex(0xC8102E);
-    private static readonly Vector4 BlackInk = Pal.Hex(0x17181C);
-    private static readonly Vector4 GreenInk = Pal.Hex(0x13844A);
-    private static readonly Vector4 BlueInk = Pal.Hex(0x1C5BC4);
+    private static readonly Vector4 Face = Pal.Hex(0xFBFCFF);
+    private static readonly Vector4 FaceShade = Pal.Hex(0xE2E7F3);
+    private static readonly Vector4 Edge = Pal.Hex(0xAEB8D2);
+    private static readonly Vector4 RedInk = Pal.Hex(0xD61C4B);
+    private static readonly Vector4 BlackInk = Pal.Hex(0x111729);
+    private static readonly Vector4 GreenInk = Pal.Hex(0x0C8A55);
+    private static readonly Vector4 BlueInk = Pal.Hex(0x1D5ED2);
 
     public static Vector2 Size(float height) => new(height * Aspect, height);
 
@@ -29,6 +29,8 @@ public static class CardArt
 
     private static (Vector4 A, Vector4 B, Vector4 Trim) BackColors() => Back switch
     {
+        CardBackStyle.Neon => (Pal.Hex(0x10285A), Pal.Hex(0x050A1F), Pal.Accent),
+        CardBackStyle.Ultraviolet => (Pal.Hex(0x3C1570), Pal.Hex(0x10052A), Pal.Magenta),
         CardBackStyle.Midnight => (Pal.Hex(0x23356B), Pal.Hex(0x0E1633), Pal.Hex(0xC9D3E8)),
         CardBackStyle.Emerald => (Pal.Hex(0x1A6B47), Pal.Hex(0x0A3020), Pal.Hex(0xE6C16A)),
         CardBackStyle.Gilded => (Pal.Hex(0x2A2116), Pal.Hex(0x120D08), Pal.Hex(0xE8B04A)),
@@ -53,7 +55,7 @@ public static class CardArt
         var r = height * 0.07f;
 
         Gfx.Shadow(dl, min, max, r, height * 0.05f, 0.45f * alpha, new Vector2(height * 0.015f, height * 0.035f + lift * 0.4f));
-        if (highlight) Gfx.Glow(dl, min, max, r, Pal.GoldLight, height * 0.09f, alpha);
+        if (highlight) Gfx.Glow(dl, min, max, r, Pal.Gold, height * 0.1f, alpha * 1.2f);
 
         if (faceUp) DrawFace(dl, min, max, r, card, alpha, squeeze);
         else DrawBack(dl, min, max, r, alpha, squeeze);
@@ -124,10 +126,11 @@ public static class CardArt
     private static void DrawBack(ImDrawListPtr dl, Vector2 min, Vector2 max, float r, float alpha, float squeeze)
     {
         var (a, b, trim) = BackColors();
+        var neon = Back is CardBackStyle.Neon or CardBackStyle.Ultraviolet;
         Gfx.RoundedGradient(dl, min, max, r, Pal.A(a, alpha), Pal.A(b, alpha));
         var h = max.Y - min.Y;
         var w = max.X - min.X;
-        dl.AddRect(min, max, Pal.U(Pal.White, 0.9f * alpha), r, ImDrawFlags.None, Math.Max(1.5f, h * 0.035f));
+        dl.AddRect(min, max, Pal.U(neon ? Pal.Hex(0xDDE6FF) : Pal.White, 0.9f * alpha), r, ImDrawFlags.None, Math.Max(1.5f, h * 0.035f));
         if (squeeze < 0.3f) return;
 
         var inset = h * 0.075f;
@@ -136,45 +139,38 @@ public static class CardArt
         if (iMax.X <= iMin.X) return;
         dl.AddRect(iMin, iMax, Pal.U(trim, 0.85f * alpha), r * 0.5f, ImDrawFlags.None, Math.Max(1, h * 0.012f));
 
-        // Diamond lattice.
-        dl.PushClipRect(iMin, iMax, true);
-        var step = h * 0.11f;
-        var latt = Pal.U(trim, 0.22f * alpha);
-        for (var x = iMin.X - h; x < iMax.X + h; x += step)
+        if (neon)
         {
-            dl.AddLine(new Vector2(x, iMin.Y), new Vector2(x + h, iMax.Y + (h - (iMax.Y - iMin.Y))), latt, 1f);
-            dl.AddLine(new Vector2(x + h, iMin.Y), new Vector2(x, iMax.Y + (h - (iMax.Y - iMin.Y))), latt, 1f);
+            // Hex lattice with a soft glow from the centre.
+            var cc = (iMin + iMax) / 2;
+            var gn = Gfx.Ellipse(Glow, cc, (iMax - iMin) * 0.6f, 24);
+            Gfx.FillRadial(dl, Glow.AsSpan(0, gn), cc, Pal.U(trim, 0.22f * alpha), Pal.U(trim, 0f));
+            Gfx.HexGrid(dl, iMin, iMax, h * 0.065f, Pal.U(trim, 0.3f * alpha), 1f);
         }
-        dl.PopClipRect();
+        else
+        {
+            // Diamond lattice.
+            dl.PushClipRect(iMin, iMax, true);
+            var step = h * 0.11f;
+            var latt = Pal.U(trim, 0.22f * alpha);
+            for (var x = iMin.X - h; x < iMax.X + h; x += step)
+            {
+                dl.AddLine(new Vector2(x, iMin.Y), new Vector2(x + h, iMax.Y + (h - (iMax.Y - iMin.Y))), latt, 1f);
+                dl.AddLine(new Vector2(x + h, iMin.Y), new Vector2(x, iMax.Y + (h - (iMax.Y - iMin.Y))), latt, 1f);
+            }
+            dl.PopClipRect();
+        }
 
-        // Clover emblem.
+        // Emblem.
         var c = (min + max) / 2;
-        var er = Math.Min(w, h) * 0.24f;
-        dl.AddCircleFilled(c, er, Pal.U(b, alpha), 32);
-        dl.AddCircle(c, er, Pal.U(trim, 0.9f * alpha), 32, Math.Max(1, h * 0.014f));
-        Clover(dl, c, er * 1.05f, Pal.A(trim, alpha));
+        var er = Math.Min(w, h) * 0.26f;
+        Span<Vector2> hex = stackalloc Vector2[6];
+        Gfx.Hexagon(hex, c, er * 1.15f);
+        Gfx.FillConvex(dl, hex, Pal.U(b, alpha));
+        Logo.Mark(dl, c, er * 1.9f, Pal.A(trim, alpha));
     }
 
-    /// <summary>Four-leaf clover — the Saucer Nights mark.</summary>
-    public static void Clover(ImDrawListPtr dl, Vector2 c, float size, Vector4 col)
-    {
-        var u = Pal.U(col);
-        var lr = size * 0.15f;
-        var d = size * 0.23f;
-        var seg = Math.Clamp((int)(size * 0.5f), 10, 28);
-        for (var k = 0; k < 4; k++)
-        {
-            var a = MathF.PI / 4 + k * MathF.PI / 2;
-            var dir = new Vector2(MathF.Cos(a), MathF.Sin(a));
-            var perp = new Vector2(-dir.Y, dir.X);
-            var lc = c + dir * d;
-            // A heart pointing at the centre.
-            dl.AddCircleFilled(lc + dir * lr * 0.35f + perp * lr * 0.74f, lr, u, seg);
-            dl.AddCircleFilled(lc + dir * lr * 0.35f - perp * lr * 0.74f, lr, u, seg);
-            dl.AddTriangleFilled(c + dir * size * 0.03f, lc + dir * lr * 0.2f + perp * lr * 1.66f, lc + dir * lr * 0.2f - perp * lr * 1.66f, u);
-        }
-        dl.AddBezierCubic(c, c + new Vector2(size * 0.04f, size * 0.22f), c + new Vector2(size * 0.2f, size * 0.32f), c + new Vector2(size * 0.16f, size * 0.5f), u, Math.Max(1.2f, size * 0.06f));
-    }
+    private static readonly Vector2[] Glow = new Vector2[32];
 
     /// <summary>Faint outline marking where a card will go.</summary>
     public static void Slot(ImDrawListPtr dl, Vector2 center, float height, Vector4 tint)

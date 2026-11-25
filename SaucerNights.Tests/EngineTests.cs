@@ -306,7 +306,7 @@ public class PokerEngineTests
     [Fact]
     public void SplitPotOddChipGoesLeftOfTheButton()
     {
-        var e = new PokerEngine(new PokerRules { SmallBlind = 5, BigBlind = 10, StartingStack = 1000, AutoStart = false });
+        var e = new PokerEngine(new PokerRules { SmallBlind = 5, BigBlind = 10, StartingStack = 1000, AutoStart = false, ProvablyFair = false });
         for (var i = 0; i < 3; i++) e.Seat(i, 1000, _now);
         // Holes are irrelevant: the board is a royal flush.
         e.DeckOverride = () => Shoe.Of("2c 3d 4h 5c 6d 7h 2h As Ks Qs 2s Js 3s Ts").Distinct().Take(52).ToArray();

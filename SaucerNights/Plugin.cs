@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
@@ -30,7 +31,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly WindowSystem _windows = new("SaucerNights");
     private readonly GameBridge _bridge;
-    private readonly FontSet _fonts;
+    private FontSet _fonts;
     private readonly LobbyWindow _lobby;
     private readonly TableWindow _table;
     private readonly string _settingsPath;
@@ -39,16 +40,17 @@ public sealed class Plugin : IDalamudPlugin
     {
         _settingsPath = Path.Combine(PluginInterface.GetPluginConfigDirectory(), "settings.json");
         Settings = LoadSettings();
+        if (Settings.Upgrade()) SaveSettings();
 
         _bridge = new GameBridge(() => Settings);
         App = new GameApp(_bridge, Settings, SaveSettings, _bridge, SystemClock.Instance);
         _bridge.Attach(App);
 
-        _fonts = new FontSet(PluginInterface.UiBuilder);
-        UiEnv.FontProvider = _fonts.Get;
+        _fonts = new FontSet(PluginInterface.UiBuilder, Settings.UiScale);
+        UiEnv.FontProvider = (role, size) => _fonts.Get(role, size);
 
-        _lobby = new LobbyWindow(App, () => _table!.Open());
-        _table = new TableWindow(App, () => _lobby.Open(0));
+        _lobby = new LobbyWindow(App, () => _table!.Open(), () => _fonts.PushBody());
+        _table = new TableWindow(App, () => _lobby.Open(0), () => _fonts.PushBody());
         _windows.AddWindow(_lobby);
         _windows.AddWindow(_table);
         App.TableOpened += () =>
@@ -65,7 +67,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var help = new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Saucer Nights. Also: /snights table | host bj | host poker | practice bj | practice poker | leave | settings",
+            HelpMessage = "Open Solution Nights. Also: /snights table | host bj|poker|roulette | practice bj|poker|roulette | leave | settings",
         };
         Commands.AddHandler(Command, help);
         Commands.AddHandler(CommandAlias, new CommandInfo(OnCommand) { ShowInHelp = false });
@@ -105,7 +107,15 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Draw()
     {
-        UiEnv.Scale = ImGuiHelpers.GlobalScale;
+        var scale = Math.Clamp(Settings.UiScale, Settings.MinScale, Settings.MaxScale);
+        // Rebuild the fonts once a scale change settles (not on every step of a slider drag).
+        if (Math.Abs(scale - _fonts.Scale) > 0.001f && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            var old = _fonts;
+            _fonts = new FontSet(PluginInterface.UiBuilder, scale);
+            old.Dispose();
+        }
+        UiEnv.Scale = ImGuiHelpers.GlobalScale * scale;
         _windows.Draw();
     }
 
@@ -140,6 +150,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             "bj" or "blackjack" or "21" => GameKind.Blackjack,
             "poker" or "holdem" or "hold'em" or "nlhe" => GameKind.Poker,
+            "roulette" or "rl" or "wheel" => GameKind.Roulette,
             _ => null,
         };
         switch (verb)
@@ -157,15 +168,16 @@ public sealed class Plugin : IDalamudPlugin
                 App.Leave();
                 break;
             case "host" when kind != null:
-                if (App.CanUseChannel() is { } problem) ChatGui.PrintError($"[Saucer Nights] {problem}");
+                if (App.CanUseChannel() is { } problem) ChatGui.PrintError($"[Solution Nights] {problem}");
                 else if (kind == GameKind.Blackjack) App.HostBlackjack();
+                else if (kind == GameKind.Roulette) App.HostRoulette();
                 else App.HostPoker();
                 break;
             case "practice" when kind != null:
                 App.Practice(kind.Value);
                 break;
             default:
-                ChatGui.Print("[Saucer Nights] Usage: /snights [table | host bj|poker | practice bj|poker | leave | settings]");
+                ChatGui.Print("[Solution Nights] Usage: /snights [table | host bj|poker|roulette | practice bj|poker|roulette | leave | settings]");
                 break;
         }
     }
